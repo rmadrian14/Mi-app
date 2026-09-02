@@ -1,6 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Link } from "@tanstack/react-router";
 import { useState, useMemo, useEffect, useRef } from "react";
+import negocioIcon from "@/assets/icons/negocio.jfif";
+import entrenamientoIcon from "@/assets/icons/entrenamiento.jfif";
+import planificacionIcon from "@/assets/icons/planificacion.jfif";
+import alimentacionIcon from "@/assets/icons/alimentacion.jfif";
 import jsPDF from "jspdf";
 import ExcelJS from "exceljs";
 import { supabase } from "@/integrations/supabase/client";
@@ -35,7 +39,6 @@ import {
   Clock,
   TrendingUp,
   Calculator,
-  Briefcase,
   ShieldAlert,
   Target,
   PlusCircle,
@@ -58,9 +61,6 @@ import {
   ExternalLink,
   X,
   Radar,
-  Dumbbell,
-  CalendarClock,
-  UtensilsCrossed,
   FileText,
   Hourglass,
   ChevronDown,
@@ -248,25 +248,25 @@ const MODULES = [
     to: "/accounting",
     title: "Negocio",
     description: "Facturación, contabilidad y gestión de tu actividad profesional.",
-    icon: Briefcase,
+    image: negocioIcon,
   },
   {
     to: "/training",
     title: "Entrenamiento",
     description: "Planifica y sigue tus rutinas de entrenamiento.",
-    icon: Dumbbell,
+    image: entrenamientoIcon,
   },
   {
     to: "/planning",
     title: "Planificación",
     description: "Organiza tu agenda y tus tareas del día a día.",
-    icon: CalendarClock,
+    image: planificacionIcon,
   },
   {
     to: "/nutrition",
     title: "Alimentación",
     description: "Controla tus comidas y tus objetivos nutricionales.",
-    icon: UtensilsCrossed,
+    image: alimentacionIcon,
   },
 ] as const;
 
@@ -279,22 +279,19 @@ function Index() {
           <p className="mt-2 text-sm text-slate-400">Elige un módulo para empezar.</p>
         </header>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {MODULES.map((m) => {
-            const Icon = m.icon;
-            return (
-              <Link
-                key={m.to}
-                to={m.to}
-                className="group flex flex-col gap-3 rounded-2xl border border-slate-800 bg-slate-900 p-6 text-left transition hover:border-emerald-500/40 hover:bg-slate-900/80"
-              >
-                <div className="grid h-12 w-12 place-items-center rounded-xl bg-gradient-to-br from-emerald-500/20 to-indigo-500/20 ring-1 ring-emerald-500/30">
-                  <Icon className="h-6 w-6 text-emerald-400" />
-                </div>
-                <h2 className="text-lg font-semibold text-white">{m.title}</h2>
-                <p className="text-sm text-slate-400">{m.description}</p>
-              </Link>
-            );
-          })}
+          {MODULES.map((m) => (
+            <Link
+              key={m.to}
+              to={m.to}
+              className="group flex flex-col gap-3 rounded-2xl border border-slate-800 bg-slate-900 p-6 text-left transition hover:border-emerald-500/40 hover:bg-slate-900/80"
+            >
+              <span className="block h-20 w-20 overflow-hidden">
+                <img src={m.image} alt="" className="h-full w-full scale-[2] object-cover" />
+              </span>
+              <h2 className="text-lg font-semibold text-white">{m.title}</h2>
+              <p className="text-sm text-slate-400">{m.description}</p>
+            </Link>
+          ))}
         </div>
       </div>
     </div>
