@@ -40,7 +40,7 @@ function InvitePage() {
       try { localStorage.setItem("veract-active-workspace", wsId); } catch {}
       toast.success("Invitación aceptada");
       setStatus("done");
-      setTimeout(() => navigate({ to: "/invoices" }), 700);
+      setTimeout(() => navigate({ to: "/accounting" }), 700);
     } catch (e: any) {
       setMessage(e.message ?? "No se pudo aceptar la invitación.");
       setStatus("error");

@@ -1,7 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { lovable } from "@/integrations/lovable/index";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,7 +20,7 @@ function AuthPage() {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
-      if (data.session) navigate({ to: "/invoices" });
+      if (data.session) navigate({ to: "/accounting" });
     });
   }, [navigate]);
 
@@ -33,14 +32,14 @@ function AuthPage() {
         const { error } = await supabase.auth.signUp({
           email,
           password,
-          options: { emailRedirectTo: window.location.origin + "/invoices" },
+          options: { emailRedirectTo: window.location.origin + "/accounting" },
         });
         if (error) throw error;
         toast.success("Cuenta creada. Revisa tu email para confirmar.");
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
-        navigate({ to: "/invoices" });
+        navigate({ to: "/accounting" });
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Error de autenticación");
@@ -50,15 +49,13 @@ function AuthPage() {
   }
 
   async function handleGoogle() {
-    const result = await lovable.auth.signInWithOAuth("google", {
-      redirect_uri: window.location.origin,
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: window.location.origin + "/accounting" },
     });
-    if (result.error) {
-      toast.error(result.error.message ?? "No se pudo iniciar sesión con Google");
-      return;
+    if (error) {
+      toast.error(error.message ?? "No se pudo iniciar sesión con Google");
     }
-    if (result.redirected) return;
-    navigate({ to: "/invoices" });
   }
 
   return (
