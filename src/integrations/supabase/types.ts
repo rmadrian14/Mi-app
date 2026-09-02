@@ -165,6 +165,36 @@ export type Database = {
           },
         ]
       }
+      exercises: {
+        Row: {
+          created_at: string
+          grupo_muscular: string
+          id: string
+          nombre: string
+          notas: string | null
+          tipo: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          grupo_muscular: string
+          id?: string
+          nombre: string
+          notas?: string | null
+          tipo: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          grupo_muscular?: string
+          id?: string
+          nombre?: string
+          notas?: string | null
+          tipo?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       fiscal_deadlines: {
         Row: {
           created_at: string
@@ -330,6 +360,42 @@ export type Database = {
           },
         ]
       }
+      personal_profile: {
+        Row: {
+          altura_cm: number | null
+          created_at: string
+          edad: number | null
+          id: string
+          limitaciones: string | null
+          objetivo: string | null
+          peso_kg: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          altura_cm?: number | null
+          created_at?: string
+          edad?: number | null
+          id?: string
+          limitaciones?: string | null
+          objetivo?: string | null
+          peso_kg?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          altura_cm?: number | null
+          created_at?: string
+          edad?: number | null
+          id?: string
+          limitaciones?: string | null
+          objetivo?: string | null
+          peso_kg?: number | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       pro_overage_blocks: {
         Row: {
           billing_period_start: string
@@ -362,6 +428,119 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      routine_daily_habits: {
+        Row: {
+          created_at: string
+          duracion_min_objetivo: number | null
+          id: string
+          routine_day_id: string
+          tipo: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          duracion_min_objetivo?: number | null
+          id?: string
+          routine_day_id: string
+          tipo: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          duracion_min_objetivo?: number | null
+          id?: string
+          routine_day_id?: string
+          tipo?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "routine_daily_habits_routine_day_id_fkey"
+            columns: ["routine_day_id"]
+            isOneToOne: false
+            referencedRelation: "routine_days"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      routine_days: {
+        Row: {
+          created_at: string
+          dia_semana: number
+          es_dia_entreno: boolean
+          id: string
+          nombre_dia: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          dia_semana: number
+          es_dia_entreno?: boolean
+          id?: string
+          nombre_dia: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          dia_semana?: number
+          es_dia_entreno?: boolean
+          id?: string
+          nombre_dia?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      routine_exercises: {
+        Row: {
+          created_at: string
+          exercise_id: string
+          id: string
+          orden: number
+          peso_objetivo_kg: number | null
+          reps_objetivo: string
+          routine_day_id: string
+          series_objetivo: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          exercise_id: string
+          id?: string
+          orden?: number
+          peso_objetivo_kg?: number | null
+          reps_objetivo: string
+          routine_day_id: string
+          series_objetivo: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          exercise_id?: string
+          id?: string
+          orden?: number
+          peso_objetivo_kg?: number | null
+          reps_objetivo?: string
+          routine_day_id?: string
+          series_objetivo?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "routine_exercises_exercise_id_fkey"
+            columns: ["exercise_id"]
+            isOneToOne: false
+            referencedRelation: "exercises"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "routine_exercises_routine_day_id_fkey"
+            columns: ["routine_day_id"]
+            isOneToOne: false
+            referencedRelation: "routine_days"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       subscriptions: {
         Row: {
