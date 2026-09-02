@@ -14,7 +14,7 @@ import { Toaster } from "sonner";
 import { AppSidebar } from "@/components/app-sidebar";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { ThemeProvider } from "@/hooks/use-theme";
-import { BookOpenCheck, FolderKanban, BarChart3, Radar } from "lucide-react";
+import { BookOpenCheck, FolderKanban, Radar } from "lucide-react";
 
 function NotFoundComponent() {
   return (
@@ -147,18 +147,16 @@ function AppShell() {
 const GLOBAL_TABS = [
   { to: "/projects", label: "Gestión de Proyectos", icon: FolderKanban },
   { to: "/accounting", label: "Contabilidad", icon: BookOpenCheck },
-  { to: "/", label: "Simulador de Tarifas", icon: BarChart3 },
   { to: "/radar", label: "Radar Autónomo", icon: Radar },
 ] as const;
 
 function GlobalTabsNav() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const operational = ["/", "/projects", "/accounting", "/radar"];
-  if (!operational.some((p) => (p === "/" ? pathname === "/" : pathname.startsWith(p)))) {
+  const operational = ["/projects", "/accounting", "/radar"];
+  if (!operational.some((p) => pathname.startsWith(p))) {
     return null;
   }
-  const isActive = (to: string) =>
-    to === "/" ? pathname === "/" : pathname.startsWith(to);
+  const isActive = (to: string) => pathname.startsWith(to);
   return (
     <div className="border-b border-slate-800 bg-slate-950/95 backdrop-blur supports-[backdrop-filter]:bg-slate-950/75 sticky top-0 z-30">
       <nav className="mx-auto flex w-full max-w-7xl flex-wrap gap-1 px-3 py-2 sm:px-6 lg:px-8">

@@ -37,11 +37,11 @@ function PricingPage() {
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Elige tu plan</h1>
             <p className="mt-2 text-slate-400">
-              Suscríbete para activar Gestión de Proyectos y Contabilidad. El Simulador de Tarifas
-              y el Radar Autónomo siguen siendo gratuitos.
+              Suscríbete para activar Gestión de Proyectos y Contabilidad. El Radar Autónomo
+              sigue siendo gratuito.
             </p>
           </div>
-          <Link to="/" className="text-sm text-slate-400 hover:text-slate-200 inline-flex items-center gap-1">
+          <Link to="/accounting" className="text-sm text-slate-400 hover:text-slate-200 inline-flex items-center gap-1">
             <ArrowLeft className="h-4 w-4" /> Volver
           </Link>
         </div>

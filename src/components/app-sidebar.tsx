@@ -1,7 +1,6 @@
 import { Link, useRouter, useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import {
-  Calculator,
   FolderKanban,
   BookOpenCheck,
   Radar,
@@ -26,14 +25,13 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 
-const sections: { label: string; items: { title: string; url: string; icon: typeof Calculator }[] }[] = [
+const sections: { label: string; items: { title: string; url: string; icon: typeof FolderKanban }[] }[] = [
   {
     label: "Navegación",
     items: [
       { title: "Gestión de Proyectos", url: "/projects", icon: FolderKanban },
       { title: "Contabilidad", url: "/accounting", icon: BookOpenCheck },
       { title: "Organización", url: "/organization", icon: CalendarDays },
-      { title: "Simulador de Tarifas", url: "/", icon: Calculator },
       { title: "Radar Autónomo", url: "/radar", icon: Radar },
       { title: "Ajustes", url: "/settings", icon: Settings },
     ],
@@ -48,8 +46,7 @@ export function AppSidebar() {
   const router = useRouter();
   const { workspaces } = useActiveWorkspace();
   const showPortfolio = workspaces.length >= 2;
-  const isActive = (path: string) =>
-    path === "/" ? currentPath === "/" : currentPath.startsWith(path);
+  const isActive = (path: string) => currentPath.startsWith(path);
 
   async function signOut() {
     await supabase.auth.signOut();

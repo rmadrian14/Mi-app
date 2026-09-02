@@ -25,7 +25,7 @@ export function PaywallView({ feature }: { feature?: string }) {
           </Link>
         </Button>
         <p className="mt-4 text-xs text-slate-500">
-          El Simulador de Tarifas y el Radar Autónomo siguen disponibles gratis.
+          El Radar Autónomo sigue disponible gratis.
         </p>
       </div>
     </div>
