@@ -7,7 +7,7 @@ import { cloudflare } from "@cloudflare/vite-plugin";
 
 // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
 // @cloudflare/vite-plugin builds from this — wrangler.jsonc main alone is insufficient.
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   plugins: [
     tsConfigPaths(),
     tailwindcss(),
@@ -15,7 +15,7 @@ export default defineConfig({
       server: { entry: "server" },
     }),
     viteReact(),
-    cloudflare({ viteEnvironment: { name: "ssr" } }),
+    ...(command === "build" ? [cloudflare({ viteEnvironment: { name: "ssr" } })] : []),
   ],
   optimizeDeps: {
     include: [
@@ -26,4 +26,4 @@ export default defineConfig({
       "react-dom/client",
     ],
   },
-});
+}));
