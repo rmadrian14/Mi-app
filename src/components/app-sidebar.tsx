@@ -1,6 +1,7 @@
 import { Link, useRouter, useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import {
+  Home,
   FolderKanban,
   BookOpenCheck,
   Radar,
@@ -77,6 +78,23 @@ export function AppSidebar() {
       </SidebarHeader>
       <SidebarContent className="bg-slate-950 p-2">
         {user && <WorkspaceSwitcher collapsed={collapsed} />}
+        <div className="mb-4">
+          <nav className="flex flex-col gap-1">
+            <Link
+              to="/"
+              title="Inicio"
+              className={
+                "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition " +
+                (currentPath === "/"
+                  ? "bg-gradient-to-r from-emerald-500/20 to-indigo-500/10 text-white ring-1 ring-emerald-500/30"
+                  : "text-slate-400 hover:bg-slate-800/60 hover:text-white")
+              }
+            >
+              <Home className={"h-5 w-5 shrink-0 " + (currentPath === "/" ? "text-emerald-400" : "")} />
+              {!collapsed && <span className="truncate">Inicio</span>}
+            </Link>
+          </nav>
+        </div>
         {sections.map((section) => {
           const items = section.label === "Navegación" && showPortfolio
             ? [
