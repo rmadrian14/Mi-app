@@ -165,6 +165,36 @@ export type Database = {
           },
         ]
       }
+      daily_habit_logs: {
+        Row: {
+          completado: boolean
+          created_at: string
+          duracion_min: number | null
+          fecha: string
+          id: string
+          tipo: string
+          user_id: string
+        }
+        Insert: {
+          completado?: boolean
+          created_at?: string
+          duracion_min?: number | null
+          fecha: string
+          id?: string
+          tipo: string
+          user_id: string
+        }
+        Update: {
+          completado?: boolean
+          created_at?: string
+          duracion_min?: number | null
+          fecha?: string
+          id?: string
+          tipo?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       exercises: {
         Row: {
           created_at: string
@@ -542,6 +572,54 @@ export type Database = {
           },
         ]
       }
+      session_sets: {
+        Row: {
+          created_at: string
+          exercise_id: string
+          id: string
+          numero_serie: number
+          peso_realizado_kg: number | null
+          reps_realizadas: number | null
+          session_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          exercise_id: string
+          id?: string
+          numero_serie: number
+          peso_realizado_kg?: number | null
+          reps_realizadas?: number | null
+          session_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          exercise_id?: string
+          id?: string
+          numero_serie?: number
+          peso_realizado_kg?: number | null
+          reps_realizadas?: number | null
+          session_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "session_sets_exercise_id_fkey"
+            columns: ["exercise_id"]
+            isOneToOne: false
+            referencedRelation: "exercises"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "session_sets_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "training_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       subscriptions: {
         Row: {
           cancel_at_period_end: boolean | null
@@ -589,6 +667,47 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      training_sessions: {
+        Row: {
+          completado: boolean
+          creado_en: string
+          es_extra: boolean
+          fecha: string
+          id: string
+          notas: string | null
+          routine_day_id: string | null
+          user_id: string
+        }
+        Insert: {
+          completado?: boolean
+          creado_en?: string
+          es_extra?: boolean
+          fecha: string
+          id?: string
+          notas?: string | null
+          routine_day_id?: string | null
+          user_id: string
+        }
+        Update: {
+          completado?: boolean
+          creado_en?: string
+          es_extra?: boolean
+          fecha?: string
+          id?: string
+          notas?: string | null
+          routine_day_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "training_sessions_routine_day_id_fkey"
+            columns: ["routine_day_id"]
+            isOneToOne: false
+            referencedRelation: "routine_days"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       user_subscriptions: {
         Row: {

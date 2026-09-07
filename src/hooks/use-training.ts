@@ -240,3 +240,212 @@ export function useRoutine() {
     createExercise,
   };
 }
+
+/* ------------------------------ Registro diario ------------------------------ */
+
+export type SessionSetDraft = {
+  numero_serie: number;
+  reps_realizadas: number | null;
+  peso_realizado_kg: number | null;
+};
+
+export type HabitLog = {
+  tipo: "movilidad" | "caminata";
+  completado: boolean;
+  duracion_min: number | null;
+};
+
+export function todayISODate(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// Sesión de hoy (si la hay) para el día de rutina indicado, sus series ya
+// guardadas, y los hábitos diarios de hoy. `routineDayId` es null en días de
+// descanso (no hay sesión planificada que buscar).
+export function useTodayEntry(routineDayId: string | null) {
+  const { user } = useAuth();
+  const fecha = todayISODate();
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [completado, setCompletado] = useState(false);
+  const [setsByExercise, setSetsByExercise] = useState<Record<string, SessionSetDraft[]>>({});
+  const [habits, setHabits] = useState<Partial<Record<"movilidad" | "caminata", HabitLog>>>({});
+  const [loading, setLoading] = useState(true);
+
+  const refresh = useCallback(async () => {
+    if (!user) {
+      setSessionId(null);
+      setCompletado(false);
+      setSetsByExercise({});
+      setHabits({});
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+
+    const [sessionRes, habitsRes] = await Promise.all([
+      routineDayId
+        ? supabase
+            .from("training_sessions")
+            .select("id, completado")
+            .eq("user_id", user.id)
+            .eq("fecha", fecha)
+            .eq("routine_day_id", routineDayId)
+            .maybeSingle()
+        : Promise.resolve({ data: null }),
+      supabase
+        .from("daily_habit_logs")
+        .select("tipo, completado, duracion_min")
+        .eq("user_id", user.id)
+        .eq("fecha", fecha),
+    ]);
+
+    const session = sessionRes.data as { id: string; completado: boolean } | null;
+    setSessionId(session?.id ?? null);
+    setCompletado(session?.completado ?? false);
+
+    if (session) {
+      const { data: sets } = await supabase
+        .from("session_sets")
+        .select("exercise_id, numero_serie, reps_realizadas, peso_realizado_kg")
+        .eq("session_id", session.id)
+        .order("numero_serie");
+      const grouped: Record<string, SessionSetDraft[]> = {};
+      for (const s of (sets ?? []) as any[]) {
+        (grouped[s.exercise_id] ??= []).push({
+          numero_serie: s.numero_serie,
+          reps_realizadas: s.reps_realizadas,
+          peso_realizado_kg: s.peso_realizado_kg,
+        });
+      }
+      setSetsByExercise(grouped);
+    } else {
+      setSetsByExercise({});
+    }
+
+    const habitMap: Partial<Record<"movilidad" | "caminata", HabitLog>> = {};
+    for (const h of (habitsRes.data ?? []) as any[]) {
+      habitMap[h.tipo as "movilidad" | "caminata"] = {
+        tipo: h.tipo,
+        completado: h.completado,
+        duracion_min: h.duracion_min,
+      };
+    }
+    setHabits(habitMap);
+    setLoading(false);
+  }, [user, routineDayId, fecha]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  const toggleHabit = useCallback(
+    async (tipo: "movilidad" | "caminata", nextCompletado: boolean) => {
+      if (!user) throw new Error("No hay sesión activa.");
+      const { data: existing } = await supabase
+        .from("daily_habit_logs")
+        .select("id")
+        .eq("user_id", user.id)
+        .eq("fecha", fecha)
+        .eq("tipo", tipo)
+        .maybeSingle();
+      if (existing) {
+        const { error } = await supabase
+          .from("daily_habit_logs")
+          .update({ completado: nextCompletado })
+          .eq("id", existing.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from("daily_habit_logs")
+          .insert({ user_id: user.id, fecha, tipo, completado: nextCompletado });
+        if (error) throw error;
+      }
+      setHabits((prev) => ({
+        ...prev,
+        [tipo]: { tipo, completado: nextCompletado, duracion_min: prev[tipo]?.duracion_min ?? null },
+      }));
+    },
+    [user, fecha],
+  );
+
+  // Guarda (crea si hace falta) la sesión planificada de hoy y sustituye sus
+  // series por las que se hayan rellenado ahora mismo.
+  const saveTodaySession = useCallback(
+    async (draft: Record<string, SessionSetDraft[]>) => {
+      if (!user) throw new Error("No hay sesión activa.");
+      if (!routineDayId) throw new Error("Hoy es día de descanso.");
+
+      let id = sessionId;
+      if (!id) {
+        const { data, error } = await supabase
+          .from("training_sessions")
+          .insert({ user_id: user.id, fecha, routine_day_id: routineDayId, es_extra: false, completado: true })
+          .select("id")
+          .single();
+        if (error) throw error;
+        id = data.id;
+      } else {
+        const { error } = await supabase.from("training_sessions").update({ completado: true }).eq("id", id);
+        if (error) throw error;
+        const { error: delError } = await supabase.from("session_sets").delete().eq("session_id", id);
+        if (delError) throw delError;
+      }
+
+      const rows = Object.entries(draft).flatMap(([exerciseId, sets]) =>
+        sets
+          .filter((s) => s.reps_realizadas != null || s.peso_realizado_kg != null)
+          .map((s) => ({
+            user_id: user.id,
+            session_id: id as string,
+            exercise_id: exerciseId,
+            numero_serie: s.numero_serie,
+            reps_realizadas: s.reps_realizadas,
+            peso_realizado_kg: s.peso_realizado_kg,
+          })),
+      );
+      if (rows.length) {
+        const { error } = await supabase.from("session_sets").insert(rows);
+        if (error) throw error;
+      }
+      setSessionId(id);
+      setCompletado(true);
+      setSetsByExercise(draft);
+    },
+    [user, routineDayId, sessionId, fecha],
+  );
+
+  return { fecha, sessionId, completado, setsByExercise, habits, loading, toggleHabit, saveTodaySession, refresh };
+}
+
+// Crea un entrenamiento fuera de plan (es_extra=true) con sus series, para
+// cualquier fecha. No es un hook: se invoca puntualmente desde el formulario.
+export async function createExtraSession(
+  userId: string,
+  fecha: string,
+  setsByExercise: Record<string, SessionSetDraft[]>,
+): Promise<void> {
+  const { data: session, error } = await supabase
+    .from("training_sessions")
+    .insert({ user_id: userId, fecha, routine_day_id: null, es_extra: true, completado: true })
+    .select("id")
+    .single();
+  if (error) throw error;
+
+  const rows = Object.entries(setsByExercise).flatMap(([exerciseId, sets]) =>
+    sets
+      .filter((s) => s.reps_realizadas != null || s.peso_realizado_kg != null)
+      .map((s) => ({
+        user_id: userId,
+        session_id: session.id as string,
+        exercise_id: exerciseId,
+        numero_serie: s.numero_serie,
+        reps_realizadas: s.reps_realizadas,
+        peso_realizado_kg: s.peso_realizado_kg,
+      })),
+  );
+  if (rows.length) {
+    const { error: setsErr } = await supabase.from("session_sets").insert(rows);
+    if (setsErr) throw setsErr;
+  }
+}
