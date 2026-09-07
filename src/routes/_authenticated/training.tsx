@@ -2,6 +2,15 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip as RTooltip,
+  ResponsiveContainer,
+} from "recharts";
+import {
   Dumbbell,
   ChevronLeft,
   ChevronRight,
@@ -15,6 +24,8 @@ import {
   Flame,
   Trophy,
   CalendarDays,
+  LineChart as LineChartIcon,
+  Star,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -22,6 +33,7 @@ import {
   useRoutine,
   useTodayEntry,
   useTrainingProgress,
+  useExerciseProgress,
   createExtraSession,
   todayISODate,
   toLocalISODate,
@@ -33,6 +45,7 @@ import {
   type SessionSetDraft,
   type DayStatus,
   type CalendarDayInfo,
+  type ProgressPoint,
 } from "@/hooks/use-training";
 
 export const Route = createFileRoute("/_authenticated/training")({
@@ -49,7 +62,7 @@ function todayDiaSemana() {
 
 function TrainingPage() {
   const { profile, loading, createProfileAndSeedRoutine } = usePersonalProfile();
-  const [view, setView] = useState<"hoy" | "rutina" | "calendario">("hoy");
+  const [view, setView] = useState<"hoy" | "rutina" | "calendario" | "progreso">("hoy");
   const progress = useTrainingProgress();
 
   if (loading) {
@@ -70,10 +83,14 @@ function TrainingPage() {
   if (view === "calendario") {
     return <CalendarioView onBack={() => setView("hoy")} progress={progress} />;
   }
+  if (view === "progreso") {
+    return <ProgresoView onBack={() => setView("hoy")} />;
+  }
   return (
     <HoyView
       onOpenRutina={() => setView("rutina")}
       onOpenCalendario={() => setView("calendario")}
+      onOpenProgreso={() => setView("progreso")}
       progress={progress}
     />
   );
@@ -246,10 +263,12 @@ function buildInitialSets(
 function HoyView({
   onOpenRutina,
   onOpenCalendario,
+  onOpenProgreso,
   progress,
 }: {
   onOpenRutina: () => void;
   onOpenCalendario: () => void;
+  onOpenProgreso: () => void;
   progress: ReturnType<typeof useTrainingProgress>;
 }) {
   const { user } = useAuth();
@@ -323,6 +342,14 @@ function HoyView({
           </div>
           <div className="flex shrink-0 flex-col items-end gap-2">
             <div className="flex gap-2">
+              <button
+                onClick={onOpenProgreso}
+                className="rounded-lg border border-slate-800 bg-slate-900 p-1.5 text-slate-300 transition hover:border-emerald-500 hover:text-white"
+                aria-label="Ver progreso y récords"
+                title="Progreso"
+              >
+                <LineChartIcon className="h-4 w-4" />
+              </button>
               <button
                 onClick={onOpenCalendario}
                 className="rounded-lg border border-slate-800 bg-slate-900 p-1.5 text-slate-300 transition hover:border-emerald-500 hover:text-white"
@@ -1004,6 +1031,209 @@ function LegendDot({ className, label }: { className: string; label: string }) {
     <div className="flex items-center gap-1.5">
       <span className={"h-3 w-3 rounded border " + className} />
       <span>{label}</span>
+    </div>
+  );
+}
+
+/* ------------------------------ Progreso y récords (e1RM) ------------------------------ */
+
+function formatShortDate(iso: string): string {
+  const [, m, d] = iso.split("-");
+  return `${parseInt(d, 10)}/${parseInt(m, 10)}`;
+}
+
+function ProgressChartDot(props: any) {
+  const { cx, cy, payload } = props;
+  if (cx == null || cy == null) return null;
+  const point: ProgressPoint = payload;
+  return (
+    <circle
+      cx={cx}
+      cy={cy}
+      r={point.isPR ? 6 : 4}
+      fill={point.isPR ? "#fbbf24" : "#34d399"}
+      stroke={point.isPR ? "#f59e0b" : "#0f172a"}
+      strokeWidth={point.isPR ? 2 : 1}
+      opacity={point.precision === "aprox" ? 0.55 : 1}
+    />
+  );
+}
+
+function ProgressTooltip({ active, payload }: any) {
+  if (!active || !payload || !payload.length) return null;
+  const point: ProgressPoint = payload[0].payload;
+  return (
+    <div className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-slate-200 shadow-lg">
+      <div className="font-semibold text-white">
+        {point.peso} kg × {point.reps} reps
+      </div>
+      <div className="mt-0.5 text-slate-400">
+        e1RM ≈ {point.e1rm?.toFixed(1)} kg
+        {point.precision === "aprox" && " (aprox.)"}
+      </div>
+      {point.isPR && <div className="mt-0.5 font-semibold text-amber-400">★ Récord personal</div>}
+    </div>
+  );
+}
+
+function ProgresoView({ onBack }: { onBack: () => void }) {
+  const { exercises, loading } = useExerciseProgress();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const sortedForSelect = useMemo(
+    () => [...exercises].sort((a, b) => a.nombre.localeCompare(b.nombre)),
+    [exercises],
+  );
+
+  useEffect(() => {
+    if (loading) return;
+    if (selectedId && exercises.some((e) => e.exerciseId === selectedId)) return;
+    // Por defecto, el ejercicio con el dato más reciente (lo último que se entrenó).
+    const mostRecent = [...exercises].sort((a, b) => {
+      const lastA = a.points[a.points.length - 1]?.fecha ?? "";
+      const lastB = b.points[b.points.length - 1]?.fecha ?? "";
+      return lastB.localeCompare(lastA);
+    })[0];
+    setSelectedId(mostRecent?.exerciseId ?? null);
+  }, [loading, exercises, selectedId]);
+
+  const selected = exercises.find((e) => e.exerciseId === selectedId) ?? null;
+  const chartData = selected ? selected.points.filter((p) => p.e1rm != null) : [];
+
+  const recordsSorted = useMemo(
+    () =>
+      exercises
+        .filter((e) => e.currentPR)
+        .sort((a, b) => b.currentPR!.fecha.localeCompare(a.currentPR!.fecha)),
+    [exercises],
+  );
+
+  return (
+    <div className="min-h-screen w-full bg-slate-950 px-4 py-8 text-slate-100">
+      <div className="mx-auto max-w-2xl">
+        <button
+          onClick={onBack}
+          className="mb-4 inline-flex items-center gap-1.5 text-sm font-medium text-slate-400 hover:text-slate-200"
+        >
+          <ChevronLeft className="h-4 w-4" /> Volver a Hoy
+        </button>
+
+        <header className="mb-6">
+          <h1 className="text-2xl font-bold tracking-tight text-white">Progreso y récords</h1>
+          <p className="mt-1 text-sm text-slate-400">
+            Evolución de tu fuerza estimada (e1RM) por ejercicio.
+          </p>
+        </header>
+
+        {loading ? (
+          <p className="text-sm text-slate-400">Cargando…</p>
+        ) : exercises.length === 0 ? (
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6 text-center text-sm text-slate-300">
+            Todavía no tienes series con reps y peso registrados. En cuanto anotes alguna en "Hoy", aparecerá aquí.
+          </div>
+        ) : (
+          <>
+            <section className="mb-6 rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+              <div className="mb-4 flex flex-col gap-1.5">
+                <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                  Ejercicio
+                </label>
+                <select
+                  value={selectedId ?? ""}
+                  onChange={(e) => setSelectedId(e.target.value)}
+                  className={inputCls}
+                >
+                  {sortedForSelect.map((e) => (
+                    <option key={e.exerciseId} value={e.exerciseId}>
+                      {e.nombre}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {chartData.length === 0 ? (
+                <p className="py-8 text-center text-xs text-slate-500">
+                  Ninguna serie de este ejercicio es estimable todavía (hace falta reps y peso, y 15 reps o menos).
+                </p>
+              ) : (
+                <div className="h-56 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={chartData} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgb(30 41 59)" />
+                      <XAxis
+                        dataKey="fecha"
+                        tickFormatter={formatShortDate}
+                        tick={{ fill: "rgb(148 163 184)", fontSize: 11 }}
+                        axisLine={{ stroke: "rgb(51 65 85)" }}
+                        tickLine={false}
+                      />
+                      <YAxis
+                        tick={{ fill: "rgb(148 163 184)", fontSize: 11 }}
+                        axisLine={{ stroke: "rgb(51 65 85)" }}
+                        tickLine={false}
+                        width={36}
+                      />
+                      <RTooltip content={<ProgressTooltip />} />
+                      <Line
+                        type="monotone"
+                        dataKey="e1rm"
+                        stroke="rgb(52 211 153)"
+                        strokeWidth={2}
+                        dot={<ProgressChartDot />}
+                        activeDot={{ r: 6 }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
+              <div className="mt-3 flex flex-wrap gap-4 text-[11px] text-slate-500">
+                <span className="flex items-center gap-1.5">
+                  <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" /> Serie
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <Star className="h-3 w-3 fill-amber-400 text-amber-400" /> Récord personal
+                </span>
+                <span className="opacity-55">○ atenuado = estimación aprox. (11-15 reps)</span>
+              </div>
+              <p className="mt-1 text-[11px] text-slate-600">
+                Las series de más de 15 repeticiones no se incluyen: por encima de ese rango ninguna fórmula es fiable.
+              </p>
+            </section>
+
+            <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+              <p className="mb-3 text-[10.5px] font-bold uppercase tracking-widest text-emerald-400">
+                Tus récords actuales
+              </p>
+              {recordsSorted.length === 0 ? (
+                <p className="text-xs text-slate-500">Todavía no hay ningún récord calculado.</p>
+              ) : (
+                <div className="space-y-2">
+                  {recordsSorted.map((e) => (
+                    <button
+                      key={e.exerciseId}
+                      onClick={() => setSelectedId(e.exerciseId)}
+                      className="flex w-full items-center gap-3 rounded-lg border border-slate-800 bg-slate-950/60 p-3 text-left transition hover:border-emerald-500/40"
+                    >
+                      <Star className="h-4 w-4 shrink-0 fill-amber-400 text-amber-400" />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-semibold text-white">{e.nombre}</div>
+                        <div className="mt-0.5 text-xs text-slate-500">
+                          {e.currentPR!.peso} kg × {e.currentPR!.reps} reps · {formatShortDate(e.currentPR!.fecha)}
+                        </div>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <div className="text-sm font-bold text-emerald-400">{e.currentPR!.e1rm.toFixed(1)} kg</div>
+                        <div className="text-[10px] text-slate-600">e1RM</div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </section>
+          </>
+        )}
+      </div>
     </div>
   );
 }

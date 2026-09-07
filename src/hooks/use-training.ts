@@ -615,3 +615,146 @@ export function useTrainingProgress() {
 
   return { loading: !ready, currentStreak, bestStreak, statusByDate, refresh };
 }
+
+/* ------------------------------ Progresión y récords (e1RM) ------------------------------ */
+
+export type SetPrecision = "alta" | "aprox" | "no_estimable";
+
+// Estimación de 1RM por serie:
+//  - 1 rep: exacto (el peso levantado ES el 1RM).
+//  - 2-10 reps: media de Epley y Brzycki — el rango donde ambas fórmulas
+//    están validadas con buena precisión (~2-10% de error).
+//  - 11-15 reps: fórmula de Mayhew et al. (1992), un modelo exponencial que
+//    la evidencia señala como más adecuado que Epley/Brzycki en este tramo
+//    (que ya pierden fiabilidad a partir de 10 reps).
+//  - Más de 15 reps: no se estima. La evidencia es clara en que ninguna
+//    fórmula es fiable ahí (demasiado peso de la resistencia muscular) —
+//    mostrar un número igualmente daría una falsa sensación de precisión.
+export function estimate1RM(peso: number, reps: number): { value: number | null; precision: SetPrecision } {
+  if (!peso || peso <= 0 || !reps || reps <= 0) return { value: null, precision: "no_estimable" };
+  if (reps === 1) return { value: peso, precision: "alta" };
+  if (reps <= 10) {
+    const epley = peso * (1 + reps / 30);
+    const brzycki = peso * 36 / (37 - reps);
+    return { value: (epley + brzycki) / 2, precision: "alta" };
+  }
+  if (reps <= 15) {
+    const mayhew = (100 * peso) / (52.2 + 41.9 * Math.exp(-0.055 * reps));
+    return { value: mayhew, precision: "aprox" };
+  }
+  return { value: null, precision: "no_estimable" };
+}
+
+export type ProgressPoint = {
+  fecha: string;
+  numero_serie: number;
+  reps: number;
+  peso: number;
+  e1rm: number | null;
+  precision: SetPrecision;
+  isPR: boolean;
+};
+
+export type ExerciseProgress = {
+  exerciseId: string;
+  nombre: string;
+  points: ProgressPoint[];
+  currentPR: { e1rm: number; fecha: string; peso: number; reps: number } | null;
+};
+
+type RawSetRow = {
+  exercise_id: string;
+  numero_serie: number;
+  reps_realizadas: number | null;
+  peso_realizado_kg: number | null;
+  fecha: string;
+};
+
+// Progresión de e1RM y récords personales por ejercicio, a partir de TODAS
+// las series ya registradas en session_sets (planificadas o extra, marcada
+// o no la sesión como completada: una serie real cuenta igual). No hay tabla
+// ni campo nuevo — es cálculo determinista en el cliente sobre datos ya
+// existentes, sin IA ni llamadas externas.
+export function useExerciseProgress() {
+  const { user } = useAuth();
+  const [rows, setRows] = useState<RawSetRow[]>([]);
+  const [exerciseNames, setExerciseNames] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+
+  const refresh = useCallback(async () => {
+    if (!user) {
+      setRows([]);
+      setExerciseNames({});
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    const [setsRes, exercisesRes] = await Promise.all([
+      supabase
+        .from("session_sets")
+        .select("exercise_id, numero_serie, reps_realizadas, peso_realizado_kg, session:session_id ( fecha )")
+        .eq("user_id", user.id),
+      supabase.from("exercises").select("id, nombre").eq("user_id", user.id),
+    ]);
+
+    const flat: RawSetRow[] = ((setsRes.data ?? []) as any[])
+      .filter((r) => r.session?.fecha)
+      .map((r) => ({
+        exercise_id: r.exercise_id,
+        numero_serie: r.numero_serie,
+        reps_realizadas: r.reps_realizadas,
+        peso_realizado_kg: r.peso_realizado_kg,
+        fecha: r.session.fecha as string,
+      }));
+    setRows(flat);
+
+    const names: Record<string, string> = {};
+    for (const e of (exercisesRes.data ?? []) as any[]) names[e.id] = e.nombre;
+    setExerciseNames(names);
+    setLoading(false);
+  }, [user]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  const exercises = useMemo<ExerciseProgress[]>(() => {
+    const byExercise = new Map<string, RawSetRow[]>();
+    for (const r of rows) {
+      if (r.reps_realizadas == null || r.peso_realizado_kg == null) continue;
+      if (!byExercise.has(r.exercise_id)) byExercise.set(r.exercise_id, []);
+      byExercise.get(r.exercise_id)!.push(r);
+    }
+
+    const result: ExerciseProgress[] = [];
+    for (const [exerciseId, list] of byExercise) {
+      const sorted = [...list].sort(
+        (a, b) => a.fecha.localeCompare(b.fecha) || a.numero_serie - b.numero_serie,
+      );
+      let runningMax = -Infinity;
+      let currentPR: ExerciseProgress["currentPR"] = null;
+      const points: ProgressPoint[] = sorted.map((r) => {
+        const reps = r.reps_realizadas as number;
+        const peso = r.peso_realizado_kg as number;
+        const { value, precision } = estimate1RM(peso, reps);
+        let isPR = false;
+        if (value != null && value > runningMax) {
+          runningMax = value;
+          isPR = true;
+          currentPR = { e1rm: value, fecha: r.fecha, peso, reps };
+        }
+        return { fecha: r.fecha, numero_serie: r.numero_serie, reps, peso, e1rm: value, precision, isPR };
+      });
+
+      result.push({
+        exerciseId,
+        nombre: exerciseNames[exerciseId] ?? "Ejercicio",
+        points,
+        currentPR,
+      });
+    }
+    return result;
+  }, [rows, exerciseNames]);
+
+  return { loading, exercises, refresh };
+}
