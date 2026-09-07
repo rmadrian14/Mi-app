@@ -1,20 +1,38 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Dumbbell, ChevronLeft, Plus, Trash2, Pencil, X, Check, Footprints, Waves } from "lucide-react";
+import {
+  Dumbbell,
+  ChevronLeft,
+  ChevronRight,
+  Plus,
+  Trash2,
+  Pencil,
+  X,
+  Check,
+  Footprints,
+  Waves,
+  Flame,
+  Trophy,
+  CalendarDays,
+} from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import {
   usePersonalProfile,
   useRoutine,
   useTodayEntry,
+  useTrainingProgress,
   createExtraSession,
   todayISODate,
+  toLocalISODate,
   type PersonalProfile,
   type PersonalProfileInput,
   type RoutineDayWithDetails,
   type RoutineExerciseItem,
   type ExerciseRow,
   type SessionSetDraft,
+  type DayStatus,
+  type CalendarDayInfo,
 } from "@/hooks/use-training";
 
 export const Route = createFileRoute("/_authenticated/training")({
@@ -31,7 +49,8 @@ function todayDiaSemana() {
 
 function TrainingPage() {
   const { profile, loading, createProfileAndSeedRoutine } = usePersonalProfile();
-  const [view, setView] = useState<"hoy" | "rutina">("hoy");
+  const [view, setView] = useState<"hoy" | "rutina" | "calendario">("hoy");
+  const progress = useTrainingProgress();
 
   if (loading) {
     return (
@@ -45,10 +64,18 @@ function TrainingPage() {
     return <QuestionnaireForm onSubmit={createProfileAndSeedRoutine} />;
   }
 
-  return view === "rutina" ? (
-    <MiRutinaView onBack={() => setView("hoy")} />
-  ) : (
-    <HoyView onOpenRutina={() => setView("rutina")} />
+  if (view === "rutina") {
+    return <MiRutinaView onBack={() => setView("hoy")} />;
+  }
+  if (view === "calendario") {
+    return <CalendarioView onBack={() => setView("hoy")} progress={progress} />;
+  }
+  return (
+    <HoyView
+      onOpenRutina={() => setView("rutina")}
+      onOpenCalendario={() => setView("calendario")}
+      progress={progress}
+    />
   );
 }
 
@@ -216,7 +243,15 @@ function buildInitialSets(
   return initial;
 }
 
-function HoyView({ onOpenRutina }: { onOpenRutina: () => void }) {
+function HoyView({
+  onOpenRutina,
+  onOpenCalendario,
+  progress,
+}: {
+  onOpenRutina: () => void;
+  onOpenCalendario: () => void;
+  progress: ReturnType<typeof useTrainingProgress>;
+}) {
   const { user } = useAuth();
   const routine = useRoutine();
   const today = routine.days.find((d) => d.dia_semana === todayDiaSemana()) ?? null;
@@ -286,12 +321,32 @@ function HoyView({ onOpenRutina }: { onOpenRutina: () => void }) {
             </h1>
             <p className="mt-1 text-sm capitalize text-slate-400">{fechaLabel}</p>
           </div>
-          <button
-            onClick={onOpenRutina}
-            className="shrink-0 rounded-lg border border-slate-800 bg-slate-900 px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:border-emerald-500 hover:text-white"
-          >
-            Mi Rutina
-          </button>
+          <div className="flex shrink-0 flex-col items-end gap-2">
+            <div className="flex gap-2">
+              <button
+                onClick={onOpenCalendario}
+                className="rounded-lg border border-slate-800 bg-slate-900 p-1.5 text-slate-300 transition hover:border-emerald-500 hover:text-white"
+                aria-label="Ver calendario"
+                title="Calendario"
+              >
+                <CalendarDays className="h-4 w-4" />
+              </button>
+              <button
+                onClick={onOpenRutina}
+                className="rounded-lg border border-slate-800 bg-slate-900 px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:border-emerald-500 hover:text-white"
+              >
+                Mi Rutina
+              </button>
+            </div>
+            {!progress.loading && (
+              <button
+                onClick={onOpenCalendario}
+                className="inline-flex items-center gap-1 text-xs font-semibold text-amber-400 hover:text-amber-300"
+              >
+                <Flame className="h-3.5 w-3.5" /> {progress.currentStreak} {progress.currentStreak === 1 ? "día" : "días"}
+              </button>
+            )}
+          </div>
         </header>
 
         {loading ? (
@@ -760,6 +815,196 @@ function ExtraWorkoutForm({
         {saving ? "Guardando…" : "Guardar entrenamiento"}
       </button>
     </form>
+  );
+}
+
+/* ------------------------------ Calendario ------------------------------ */
+
+const DIAS_CORTOS = ["L", "M", "X", "J", "V", "S", "D"];
+const MESES_LABEL = [
+  "enero", "febrero", "marzo", "abril", "mayo", "junio",
+  "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+];
+
+// Rejilla del mes en semanas de lunes a domingo: null para los huecos antes
+// del día 1 y después del último día.
+function buildMonthGrid(year: number, month: number): (string | null)[] {
+  const first = new Date(year, month, 1);
+  const leading = first.getDay() === 0 ? 6 : first.getDay() - 1;
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const cells: (string | null)[] = [];
+  for (let i = 0; i < leading; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) {
+    cells.push(`${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`);
+  }
+  return cells;
+}
+
+function dayCellClass(status: DayStatus | undefined): string {
+  switch (status) {
+    case "cumplido":
+      return "border-emerald-500 bg-emerald-500/20 text-emerald-200";
+    case "incumplido":
+      return "border-rose-500 bg-rose-500/15 text-rose-200";
+    case "pendiente":
+      return "border-slate-700 bg-slate-900 text-slate-200";
+    case "descanso":
+      return "border-slate-800 bg-slate-800/60 text-slate-400";
+    default:
+      // Fuera de rango (antes de crear el perfil o todavía no ha llegado).
+      return "border-slate-800/50 bg-transparent text-slate-700";
+  }
+}
+
+function CalendarioView({
+  onBack,
+  progress,
+}: {
+  onBack: () => void;
+  progress: ReturnType<typeof useTrainingProgress>;
+}) {
+  const now = new Date();
+  const [viewYear, setViewYear] = useState(now.getFullYear());
+  const [viewMonth, setViewMonth] = useState(now.getMonth());
+
+  const isCurrentMonth = viewYear === now.getFullYear() && viewMonth === now.getMonth();
+  const grid = useMemo(() => buildMonthGrid(viewYear, viewMonth), [viewYear, viewMonth]);
+
+  function prevMonth() {
+    if (viewMonth === 0) {
+      setViewMonth(11);
+      setViewYear((y) => y - 1);
+    } else {
+      setViewMonth((m) => m - 1);
+    }
+  }
+  function nextMonth() {
+    if (isCurrentMonth) return;
+    if (viewMonth === 11) {
+      setViewMonth(0);
+      setViewYear((y) => y + 1);
+    } else {
+      setViewMonth((m) => m + 1);
+    }
+  }
+
+  return (
+    <div className="min-h-screen w-full bg-slate-950 px-4 py-8 text-slate-100">
+      <div className="mx-auto max-w-2xl">
+        <button
+          onClick={onBack}
+          className="mb-4 inline-flex items-center gap-1.5 text-sm font-medium text-slate-400 hover:text-slate-200"
+        >
+          <ChevronLeft className="h-4 w-4" /> Volver a Hoy
+        </button>
+
+        <header className="mb-6">
+          <h1 className="text-2xl font-bold tracking-tight text-white">Calendario</h1>
+          <p className="mt-1 text-sm text-slate-400">Tu constancia con la rutina, día a día.</p>
+        </header>
+
+        <div className="mb-6 grid grid-cols-2 gap-3">
+          <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4 text-center">
+            <div className="flex items-center justify-center gap-1.5 text-amber-400">
+              <Flame className="h-4 w-4" />
+              <span className="text-[10.5px] font-bold uppercase tracking-widest">Racha actual</span>
+            </div>
+            <div className="mt-1 text-2xl font-bold text-white">
+              {progress.loading ? "…" : progress.currentStreak}
+            </div>
+          </div>
+          <div className="rounded-2xl border border-indigo-500/30 bg-indigo-500/5 p-4 text-center">
+            <div className="flex items-center justify-center gap-1.5 text-indigo-300">
+              <Trophy className="h-4 w-4" />
+              <span className="text-[10.5px] font-bold uppercase tracking-widest">Récord</span>
+            </div>
+            <div className="mt-1 text-2xl font-bold text-white">
+              {progress.loading ? "…" : progress.bestStreak}
+            </div>
+          </div>
+        </div>
+
+        <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+          <div className="mb-4 flex items-center justify-between">
+            <button
+              onClick={prevMonth}
+              aria-label="Mes anterior"
+              className="grid h-8 w-8 place-items-center rounded-lg border border-slate-800 bg-slate-950 text-slate-300 transition hover:border-emerald-500 hover:text-white"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <span className="text-[15px] font-bold capitalize text-white">
+              {MESES_LABEL[viewMonth]} {viewYear}
+            </span>
+            <button
+              onClick={nextMonth}
+              disabled={isCurrentMonth}
+              aria-label="Mes siguiente"
+              className="grid h-8 w-8 place-items-center rounded-lg border border-slate-800 bg-slate-950 text-slate-300 transition hover:border-emerald-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:border-slate-800 disabled:hover:text-slate-300"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="mb-1.5 grid grid-cols-7 gap-1.5">
+            {DIAS_CORTOS.map((d) => (
+              <div
+                key={d}
+                className="pb-1 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-500"
+              >
+                {d}
+              </div>
+            ))}
+          </div>
+
+          {progress.loading ? (
+            <p className="py-8 text-center text-sm text-slate-400">Cargando…</p>
+          ) : (
+            <div className="grid grid-cols-7 gap-1.5">
+              {grid.map((iso, i) => {
+                if (!iso) return <div key={`e-${i}`} />;
+                const info: CalendarDayInfo | undefined = progress.statusByDate.get(iso);
+                const dayNum = parseInt(iso.split("-")[2], 10);
+                const isToday = iso === todayISODate();
+                return (
+                  <div
+                    key={iso}
+                    className={
+                      "relative flex h-11 items-center justify-center rounded-lg border text-sm font-semibold " +
+                      dayCellClass(info?.status) +
+                      (isToday ? " ring-1 ring-inset ring-emerald-400" : "")
+                    }
+                  >
+                    {dayNum}
+                    {info?.extra && (
+                      <span className="absolute bottom-1 right-1 h-1.5 w-1.5 rounded-full bg-indigo-400" />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="mt-4 flex flex-wrap gap-4 text-[11.5px] text-slate-400">
+            <LegendDot className="border-emerald-500 bg-emerald-500/20" label="Plan cumplido" />
+            <LegendDot className="border-rose-500 bg-rose-500/15" label="Plan incumplido" />
+            <LegendDot className="border-slate-800 bg-slate-800/60" label="Descanso" />
+            <span className="flex items-center gap-1.5">
+              <span className="h-1.5 w-1.5 rounded-full bg-indigo-400" /> Entrenamiento extra ese día
+            </span>
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function LegendDot({ className, label }: { className: string; label: string }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className={"h-3 w-3 rounded border " + className} />
+      <span>{label}</span>
+    </div>
   );
 }
 

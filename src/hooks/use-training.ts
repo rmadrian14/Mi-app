@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { seedDefaultRoutine } from "@/lib/training-seed";
@@ -256,9 +256,12 @@ export type HabitLog = {
   duracion_min: number | null;
 };
 
-export function todayISODate(): string {
-  const d = new Date();
+export function toLocalISODate(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+export function todayISODate(): string {
+  return toLocalISODate(new Date());
 }
 
 // Sesión de hoy (si la hay) para el día de rutina indicado, sus series ya
@@ -507,4 +510,108 @@ export async function createExtraSession(
     const { error: setsErr } = await supabase.from("session_sets").insert(rows);
     if (setsErr) throw setsErr;
   }
+}
+
+/* ------------------------------ Rachas y calendario ------------------------------ */
+
+export type DayStatus = "cumplido" | "incumplido" | "pendiente" | "descanso";
+
+export type CalendarDayInfo = {
+  fecha: string;
+  status: DayStatus;
+  extra: boolean;
+};
+
+type SessionSummaryRow = {
+  fecha: string;
+  routine_day_id: string | null;
+  es_extra: boolean;
+  completado: boolean;
+};
+
+// Racha actual y mejor racha histórica, más el estado de cada día (para
+// pintar el calendario) desde que se creó el perfil (cuando se sembró la
+// rutina) hasta hoy. Un solo recorrido cronológico calcula ambas rachas:
+// los días de descanso no cuentan ni cortan; un día de plan pasado sin
+// completar corta la racha; hoy, si todavía no se ha completado, no la
+// corta (queda "pendiente") pero tampoco la alarga.
+export function useTrainingProgress() {
+  const { user } = useAuth();
+  const { profile, loading: profileLoading } = usePersonalProfile();
+  const { days: routineDays, loading: routineLoading } = useRoutine();
+  const [sessions, setSessions] = useState<SessionSummaryRow[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const refresh = useCallback(async () => {
+    if (!user || !profile) {
+      setSessions([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    const { data } = await supabase
+      .from("training_sessions")
+      .select("fecha, routine_day_id, es_extra, completado")
+      .eq("user_id", user.id)
+      .lte("fecha", todayISODate())
+      .order("fecha");
+    setSessions((data ?? []) as SessionSummaryRow[]);
+    setLoading(false);
+  }, [user, profile]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  const ready = !profileLoading && !routineLoading && !loading && !!profile;
+
+  const { currentStreak, bestStreak, statusByDate } = useMemo(() => {
+    const statusByDate = new Map<string, CalendarDayInfo>();
+    if (!ready || !profile) {
+      return { currentStreak: 0, bestStreak: 0, statusByDate };
+    }
+
+    const dowToDay = new Map(routineDays.map((d) => [d.dia_semana, d]));
+    const completedDates = new Set(
+      sessions.filter((s) => s.completado && !s.es_extra).map((s) => s.fecha),
+    );
+    const extraDates = new Set(sessions.filter((s) => s.es_extra).map((s) => s.fecha));
+
+    const createdAt = new Date(profile.created_at);
+    const cursor = new Date(createdAt.getFullYear(), createdAt.getMonth(), createdAt.getDate());
+    const now = new Date();
+    const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayStr = todayISODate();
+
+    let running = 0;
+    let best = 0;
+
+    while (cursor <= todayMidnight) {
+      const iso = toLocalISODate(cursor);
+      const dow = (cursor.getDay() + 6) % 7; // 0=lunes ... 6=domingo
+      const routineDay = dowToDay.get(dow);
+      const hasExtra = extraDates.has(iso);
+
+      let status: DayStatus;
+      if (!routineDay || !routineDay.es_dia_entreno) {
+        status = "descanso";
+      } else if (completedDates.has(iso)) {
+        status = "cumplido";
+        running += 1;
+        best = Math.max(best, running);
+      } else if (iso === todayStr) {
+        status = "pendiente";
+      } else {
+        status = "incumplido";
+        running = 0;
+      }
+
+      statusByDate.set(iso, { fecha: iso, status, extra: hasExtra });
+      cursor.setDate(cursor.getDate() + 1);
+    }
+
+    return { currentStreak: running, bestStreak: best, statusByDate };
+  }, [ready, profile, routineDays, sessions]);
+
+  return { loading: !ready, currentStreak, bestStreak, statusByDate, refresh };
 }
