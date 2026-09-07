@@ -244,6 +244,7 @@ export function useRoutine() {
 /* ------------------------------ Registro diario ------------------------------ */
 
 export type SessionSetDraft = {
+  id?: string | null;
   numero_serie: number;
   reps_realizadas: number | null;
   peso_realizado_kg: number | null;
@@ -263,6 +264,11 @@ export function todayISODate(): string {
 // Sesión de hoy (si la hay) para el día de rutina indicado, sus series ya
 // guardadas, y los hábitos diarios de hoy. `routineDayId` es null en días de
 // descanso (no hay sesión planificada que buscar).
+//
+// Cada serie se guarda en su propia fila EN CUANTO se registra (saveSet), en
+// vez de acumular todo en estado local y volcarlo de golpe al final: así una
+// recarga, una navegación a otra pantalla o varias pulsaciones del botón de
+// completar nunca pueden perder series ya registradas.
 export function useTodayEntry(routineDayId: string | null) {
   const { user } = useAuth();
   const fecha = todayISODate();
@@ -284,15 +290,17 @@ export function useTodayEntry(routineDayId: string | null) {
     setLoading(true);
 
     const [sessionRes, habitsRes] = await Promise.all([
-      routineDayId
-        ? supabase
-            .from("training_sessions")
-            .select("id, completado")
-            .eq("user_id", user.id)
-            .eq("fecha", fecha)
-            .eq("routine_day_id", routineDayId)
-            .maybeSingle()
-        : Promise.resolve({ data: null }),
+      // Cualquier sesión de hoy sirve (planificada o extra): si ya existe una,
+      // se reutiliza en vez de crear otra al guardar. Si hay más de una
+      // (edge case de pruebas), nos quedamos con la más antigua.
+      supabase
+        .from("training_sessions")
+        .select("id, completado")
+        .eq("user_id", user.id)
+        .eq("fecha", fecha)
+        .order("creado_en", { ascending: true })
+        .limit(1)
+        .maybeSingle(),
       supabase
         .from("daily_habit_logs")
         .select("tipo, completado, duracion_min")
@@ -307,12 +315,13 @@ export function useTodayEntry(routineDayId: string | null) {
     if (session) {
       const { data: sets } = await supabase
         .from("session_sets")
-        .select("exercise_id, numero_serie, reps_realizadas, peso_realizado_kg")
+        .select("id, exercise_id, numero_serie, reps_realizadas, peso_realizado_kg")
         .eq("session_id", session.id)
         .order("numero_serie");
       const grouped: Record<string, SessionSetDraft[]> = {};
       for (const s of (sets ?? []) as any[]) {
         (grouped[s.exercise_id] ??= []).push({
+          id: s.id,
           numero_serie: s.numero_serie,
           reps_realizadas: s.reps_realizadas,
           peso_realizado_kg: s.peso_realizado_kg,
@@ -369,53 +378,103 @@ export function useTodayEntry(routineDayId: string | null) {
     [user, fecha],
   );
 
-  // Guarda (crea si hace falta) la sesión planificada de hoy y sustituye sus
-  // series por las que se hayan rellenado ahora mismo.
-  const saveTodaySession = useCallback(
-    async (draft: Record<string, SessionSetDraft[]>) => {
-      if (!user) throw new Error("No hay sesión activa.");
-      if (!routineDayId) throw new Error("Hoy es día de descanso.");
+  // Crea la sesión de hoy si todavía no existe (completado=false) y devuelve
+  // su id. Idempotente: si ya existe, la reutiliza.
+  const ensureSession = useCallback(async (): Promise<string> => {
+    if (sessionId) return sessionId;
+    if (!user) throw new Error("No hay sesión activa.");
+    if (!routineDayId) throw new Error("Hoy es día de descanso.");
+    const { data, error } = await supabase
+      .from("training_sessions")
+      .insert({ user_id: user.id, fecha, routine_day_id: routineDayId, es_extra: false, completado: false })
+      .select("id")
+      .single();
+    if (error) throw error;
+    setSessionId(data.id);
+    return data.id as string;
+  }, [sessionId, user, routineDayId, fecha]);
 
-      let id = sessionId;
-      if (!id) {
+  // Guarda UNA serie. Si la fila ya tiene id (ya se había guardado antes) se
+  // actualiza directamente por id; si no, se inserta y se recuerda el id
+  // devuelto para que la siguiente edición de esa misma fila actualice en
+  // vez de insertar otra. Se llama al momento, por cada serie.
+  const saveSet = useCallback(
+    async (exerciseId: string, row: SessionSetDraft) => {
+      if (!user) throw new Error("No hay sesión activa.");
+      const sid = await ensureSession();
+      let rowId = row.id ?? null;
+      if (rowId) {
+        const { error } = await supabase
+          .from("session_sets")
+          .update({ reps_realizadas: row.reps_realizadas, peso_realizado_kg: row.peso_realizado_kg })
+          .eq("id", rowId);
+        if (error) throw error;
+      } else {
         const { data, error } = await supabase
-          .from("training_sessions")
-          .insert({ user_id: user.id, fecha, routine_day_id: routineDayId, es_extra: false, completado: true })
+          .from("session_sets")
+          .insert({
+            user_id: user.id,
+            session_id: sid,
+            exercise_id: exerciseId,
+            numero_serie: row.numero_serie,
+            reps_realizadas: row.reps_realizadas,
+            peso_realizado_kg: row.peso_realizado_kg,
+          })
           .select("id")
           .single();
         if (error) throw error;
-        id = data.id;
-      } else {
-        const { error } = await supabase.from("training_sessions").update({ completado: true }).eq("id", id);
-        if (error) throw error;
-        const { error: delError } = await supabase.from("session_sets").delete().eq("session_id", id);
-        if (delError) throw delError;
+        rowId = data.id;
       }
-
-      const rows = Object.entries(draft).flatMap(([exerciseId, sets]) =>
-        sets
-          .filter((s) => s.reps_realizadas != null || s.peso_realizado_kg != null)
-          .map((s) => ({
-            user_id: user.id,
-            session_id: id as string,
-            exercise_id: exerciseId,
-            numero_serie: s.numero_serie,
-            reps_realizadas: s.reps_realizadas,
-            peso_realizado_kg: s.peso_realizado_kg,
-          })),
-      );
-      if (rows.length) {
-        const { error } = await supabase.from("session_sets").insert(rows);
-        if (error) throw error;
-      }
-      setSessionId(id);
-      setCompletado(true);
-      setSetsByExercise(draft);
+      const saved: SessionSetDraft = { ...row, id: rowId };
+      setSetsByExercise((prev) => {
+        const rows = prev[exerciseId] ?? [];
+        const idx = rows.findIndex((r) => r.numero_serie === row.numero_serie);
+        const next =
+          idx >= 0
+            ? rows.map((r, i) => (i === idx ? saved : r))
+            : [...rows, saved].sort((a, b) => a.numero_serie - b.numero_serie);
+        return { ...prev, [exerciseId]: next };
+      });
     },
-    [user, routineDayId, sessionId, fecha],
+    [user, ensureSession],
   );
 
-  return { fecha, sessionId, completado, setsByExercise, habits, loading, toggleHabit, saveTodaySession, refresh };
+  // Quita una serie: si tenía id (ya guardada en BD) borra esa fila por id;
+  // si nunca llegó a guardarse, es un no-op de servidor, solo se quita del
+  // estado local.
+  const removeSet = useCallback(async (exerciseId: string, row: SessionSetDraft) => {
+    if (row.id) {
+      const { error } = await supabase.from("session_sets").delete().eq("id", row.id);
+      if (error) throw error;
+    }
+    setSetsByExercise((prev) => ({
+      ...prev,
+      [exerciseId]: (prev[exerciseId] ?? []).filter((r) => r.numero_serie !== row.numero_serie),
+    }));
+  }, []);
+
+  // Marca la sesión de hoy como completada (creándola primero si aún no
+  // existe, p.ej. si el usuario no ha registrado ninguna serie).
+  const markCompleted = useCallback(async () => {
+    const sid = await ensureSession();
+    const { error } = await supabase.from("training_sessions").update({ completado: true }).eq("id", sid);
+    if (error) throw error;
+    setCompletado(true);
+  }, [ensureSession]);
+
+  return {
+    fecha,
+    sessionId,
+    completado,
+    setsByExercise,
+    habits,
+    loading,
+    toggleHabit,
+    saveSet,
+    removeSet,
+    markCompleted,
+    refresh,
+  };
 }
 
 // Crea un entrenamiento fuera de plan (es_extra=true) con sus series, para

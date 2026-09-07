@@ -195,15 +195,23 @@ function parseLeadingNumber(s: string | null | undefined): number | null {
   return m ? parseFloat(m[0]) : null;
 }
 
-function buildInitialSets(day: RoutineDayWithDetails): Record<string, SessionSetDraft[]> {
+// Combina las series ya guardadas en BD con filas vacías de relleno hasta
+// cubrir el objetivo de series_objetivo (para que se vean tantos huecos como
+// series planeadas, aunque todavía no se hayan rellenado).
+function buildInitialSets(
+  day: RoutineDayWithDetails,
+  existing: Record<string, SessionSetDraft[]>,
+): Record<string, SessionSetDraft[]> {
   const initial: Record<string, SessionSetDraft[]> = {};
   for (const ex of day.ejercicios) {
-    const n = parseLeadingNumber(ex.series_objetivo) ?? 3;
-    initial[ex.exercise_id] = Array.from({ length: Math.max(1, Math.round(n)) }, (_, i) => ({
-      numero_serie: i + 1,
-      reps_realizadas: null,
-      peso_realizado_kg: null,
-    }));
+    const saved = (existing[ex.exercise_id] ?? []).map((r) => ({ ...r }));
+    const target = parseLeadingNumber(ex.series_objetivo) ?? 3;
+    const minRows = Math.max(1, Math.round(target));
+    while (saved.length < minRows) {
+      const nextNum = saved.length ? Math.max(...saved.map((r) => r.numero_serie)) + 1 : 1;
+      saved.push({ id: null, numero_serie: nextNum, reps_realizadas: null, peso_realizado_kg: null });
+    }
+    initial[ex.exercise_id] = saved.sort((a, b) => a.numero_serie - b.numero_serie);
   }
   return initial;
 }
@@ -214,28 +222,47 @@ function HoyView({ onOpenRutina }: { onOpenRutina: () => void }) {
   const today = routine.days.find((d) => d.dia_semana === todayDiaSemana()) ?? null;
   const entry = useTodayEntry(today?.id ?? null);
   const [draftSets, setDraftSets] = useState<Record<string, SessionSetDraft[]>>({});
-  const [saving, setSaving] = useState(false);
+  const [completing, setCompleting] = useState(false);
   const [showExtra, setShowExtra] = useState(false);
 
   useEffect(() => {
     if (!today || entry.loading) return;
-    if (Object.keys(entry.setsByExercise).length > 0) {
-      setDraftSets(entry.setsByExercise);
-    } else {
-      setDraftSets(buildInitialSets(today));
-    }
+    setDraftSets(buildInitialSets(today, entry.setsByExercise));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [today?.id, entry.loading]);
 
-  async function handleComplete() {
-    setSaving(true);
+  // Cada serie se guarda al salir del campo (no se espera al botón de
+  // "completado"): si la fila tiene datos se guarda/actualiza, si se ha
+  // dejado vacía y antes tenía datos guardados, se borra.
+  async function handleSaveRow(exerciseId: string, row: SessionSetDraft) {
     try {
-      await entry.saveTodaySession(draftSets);
-      toast.success("Entrenamiento de hoy guardado.");
+      if (row.reps_realizadas == null && row.peso_realizado_kg == null) {
+        await entry.removeSet(exerciseId, row);
+      } else {
+        await entry.saveSet(exerciseId, row);
+      }
     } catch (err) {
-      toast.error((err as Error).message || "No se pudo guardar el entrenamiento.");
+      toast.error((err as Error).message || "No se pudo guardar la serie.");
+    }
+  }
+
+  async function handleRemoveRow(exerciseId: string, row: SessionSetDraft) {
+    try {
+      await entry.removeSet(exerciseId, row);
+    } catch (err) {
+      toast.error((err as Error).message || "No se pudo quitar la serie.");
+    }
+  }
+
+  async function handleComplete() {
+    setCompleting(true);
+    try {
+      await entry.markCompleted();
+      toast.success("Entrenamiento de hoy marcado como completado.");
+    } catch (err) {
+      toast.error((err as Error).message || "No se pudo marcar como completado.");
     } finally {
-      setSaving(false);
+      setCompleting(false);
     }
   }
 
@@ -279,6 +306,8 @@ function HoyView({ onOpenRutina }: { onOpenRutina: () => void }) {
                     exercise={ex}
                     sets={draftSets[ex.exercise_id] ?? []}
                     onChange={(sets) => setDraftSets((prev) => ({ ...prev, [ex.exercise_id]: sets }))}
+                    onSaveRow={(row) => handleSaveRow(ex.exercise_id, row)}
+                    onRemoveRow={(row) => handleRemoveRow(ex.exercise_id, row)}
                   />
                 ))}
               </div>
@@ -293,13 +322,13 @@ function HoyView({ onOpenRutina }: { onOpenRutina: () => void }) {
             {today?.es_dia_entreno && (
               <button
                 onClick={handleComplete}
-                disabled={saving}
+                disabled={completing}
                 className="mt-4 w-full rounded-lg bg-gradient-to-r from-emerald-500 to-indigo-500 py-2.5 text-sm font-bold text-white shadow-lg shadow-emerald-500/20 transition hover:opacity-90 disabled:opacity-60"
               >
-                {saving
+                {completing
                   ? "Guardando…"
                   : entry.completado
-                    ? "Actualizar entrenamiento completado"
+                    ? "Entrenamiento completado ✓"
                     : "Marcar entrenamiento como completado"}
               </button>
             )}
@@ -347,10 +376,14 @@ function ExerciseSetsCard({
   exercise,
   sets,
   onChange,
+  onSaveRow,
+  onRemoveRow,
 }: {
   exercise: RoutineExerciseItem;
   sets: SessionSetDraft[];
   onChange: (sets: SessionSetDraft[]) => void;
+  onSaveRow: (row: SessionSetDraft) => void;
+  onRemoveRow: (row: SessionSetDraft) => void;
 }) {
   const targetReps = parseLeadingNumber(exercise.reps_objetivo);
   const targetPeso = exercise.peso_objetivo_kg;
@@ -359,10 +392,13 @@ function ExerciseSetsCard({
     onChange(sets.map((s, idx) => (idx === i ? { ...s, ...patch } : s)));
   }
   function addRow() {
-    onChange([...sets, { numero_serie: sets.length + 1, reps_realizadas: null, peso_realizado_kg: null }]);
+    const nextNum = sets.length ? Math.max(...sets.map((s) => s.numero_serie)) + 1 : 1;
+    onChange([...sets, { id: null, numero_serie: nextNum, reps_realizadas: null, peso_realizado_kg: null }]);
   }
   function removeRow(i: number) {
-    onChange(sets.filter((_, idx) => idx !== i).map((s, idx) => ({ ...s, numero_serie: idx + 1 })));
+    const row = sets[i];
+    onChange(sets.filter((_, idx) => idx !== i));
+    onRemoveRow(row);
   }
 
   return (
@@ -383,6 +419,7 @@ function ExerciseSetsCard({
                 placeholder="Reps"
                 value={s.reps_realizadas ?? ""}
                 onChange={(e) => updateRow(i, { reps_realizadas: e.target.value ? parseInt(e.target.value, 10) : null })}
+                onBlur={() => onSaveRow(sets[i])}
                 className={inputCls + " flex-1"}
               />
               <input
@@ -391,6 +428,7 @@ function ExerciseSetsCard({
                 placeholder="Kg"
                 value={s.peso_realizado_kg ?? ""}
                 onChange={(e) => updateRow(i, { peso_realizado_kg: e.target.value ? parseFloat(e.target.value) : null })}
+                onBlur={() => onSaveRow(sets[i])}
                 className={inputCls + " flex-1"}
               />
               <span className={"h-2.5 w-2.5 shrink-0 rounded-full " + status.dot} title={status.title} />
