@@ -200,6 +200,7 @@ export type Database = {
           created_at: string
           grupo_muscular: string
           id: string
+          musculos_secundarios: string[]
           nombre: string
           notas: string | null
           tipo: string
@@ -209,6 +210,7 @@ export type Database = {
           created_at?: string
           grupo_muscular: string
           id?: string
+          musculos_secundarios?: string[]
           nombre: string
           notas?: string | null
           tipo: string
@@ -218,6 +220,7 @@ export type Database = {
           created_at?: string
           grupo_muscular?: string
           id?: string
+          musculos_secundarios?: string[]
           nombre?: string
           notas?: string | null
           tipo?: string

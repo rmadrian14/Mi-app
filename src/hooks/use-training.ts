@@ -74,6 +74,7 @@ export type ExerciseRow = {
   id: string;
   nombre: string;
   grupo_muscular: string;
+  musculos_secundarios: string[];
   tipo: "fuerza" | "movilidad" | "cardio";
   notas: string | null;
 };
@@ -132,7 +133,7 @@ export function useRoutine() {
         .select("id, routine_day_id, tipo, duracion_min_objetivo"),
       supabase
         .from("exercises")
-        .select("id, nombre, grupo_muscular, tipo, notas")
+        .select("id, nombre, grupo_muscular, musculos_secundarios, tipo, notas")
         .order("nombre"),
     ]);
 
@@ -215,18 +216,38 @@ export function useRoutine() {
   );
 
   const createExercise = useCallback(
-    async (input: { nombre: string; grupo_muscular: string; tipo: "fuerza" | "movilidad" | "cardio"; notas?: string | null }) => {
+    async (input: {
+      nombre: string;
+      grupo_muscular: string;
+      tipo: "fuerza" | "movilidad" | "cardio";
+      notas?: string | null;
+      musculos_secundarios?: string[];
+    }) => {
       if (!user) throw new Error("No hay sesión activa.");
       const { data, error } = await supabase
         .from("exercises")
-        .insert({ user_id: user.id, ...input, notas: input.notas ?? null })
-        .select("id, nombre, grupo_muscular, tipo, notas")
+        .insert({
+          user_id: user.id,
+          ...input,
+          notas: input.notas ?? null,
+          musculos_secundarios: input.musculos_secundarios ?? [],
+        })
+        .select("id, nombre, grupo_muscular, musculos_secundarios, tipo, notas")
         .single();
       if (error) throw error;
       await refresh();
       return data as ExerciseRow;
     },
     [user, refresh],
+  );
+
+  const updateExercise = useCallback(
+    async (id: string, patch: Partial<{ grupo_muscular: string; musculos_secundarios: string[] }>) => {
+      const { error } = await supabase.from("exercises").update(patch).eq("id", id);
+      if (error) throw error;
+      await refresh();
+    },
+    [refresh],
   );
 
   return {
@@ -238,6 +259,7 @@ export function useRoutine() {
     removeExerciseFromDay,
     updateRoutineExercise,
     createExercise,
+    updateExercise,
   };
 }
 
@@ -845,4 +867,151 @@ export function useExerciseProgress() {
   }, [rows, exerciseNames]);
 
   return { loading, exercises, refresh };
+}
+
+/* ------------------------------ Volumen semanal por grupo muscular ------------------------------ */
+
+export type MuscleLandmark = { mev: number; mavLow: number; mavHigh: number; mrv: number };
+
+// Puntos de referencia semanales (series por músculo) de la literatura de
+// volumen de entrenamiento (Israetel/RP y trabajos relacionados sobre
+// MEV/MAV/MRV). Son orientativos y generales, no individualizados: no tienen
+// en cuenta experiencia de entrenamiento, recuperación individual, ni
+// proximidad al fallo por serie.
+export const MUSCLE_LANDMARKS: Record<string, MuscleLandmark> = {
+  Pecho: { mev: 6, mavLow: 12, mavHigh: 20, mrv: 25 },
+  Espalda: { mev: 8, mavLow: 14, mavHigh: 22, mrv: 25 },
+  Hombros: { mev: 6, mavLow: 14, mavHigh: 22, mrv: 26 },
+  Bíceps: { mev: 5, mavLow: 10, mavHigh: 18, mrv: 20 },
+  Tríceps: { mev: 5, mavLow: 10, mavHigh: 18, mrv: 20 },
+  Cuádriceps: { mev: 8, mavLow: 12, mavHigh: 18, mrv: 20 },
+  Isquiosurales: { mev: 6, mavLow: 10, mavHigh: 16, mrv: 20 },
+  Glúteos: { mev: 4, mavLow: 10, mavHigh: 16, mrv: 16 },
+  Gemelos: { mev: 6, mavLow: 10, mavHigh: 16, mrv: 20 },
+};
+
+// Orden fijo de las barras en la gráfica de volumen semanal.
+export const MUSCLE_ORDER: string[] = Object.keys(MUSCLE_LANDMARKS);
+
+function stripAccents(s: string): string {
+  return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+// grupo_muscular es texto libre (no hay integración con ExerciseDB ni un
+// enum controlado), así que variantes triviales (singular/plural, con o sin
+// acento) deben reconocerse como el mismo músculo. Lo que no aparece aquí no
+// tiene landmark y se excluye del cálculo de volumen, en vez de inventarle un
+// MEV/MAV/MRV.
+const MUSCLE_ALIASES: Record<string, string> = {
+  pecho: "Pecho",
+  espalda: "Espalda",
+  hombro: "Hombros",
+  hombros: "Hombros",
+  gemelo: "Gemelos",
+  gemelos: "Gemelos",
+  biceps: "Bíceps",
+  triceps: "Tríceps",
+  cuadriceps: "Cuádriceps",
+  isquiosurales: "Isquiosurales",
+  isquiotibiales: "Isquiosurales",
+  femoral: "Isquiosurales",
+  gluteo: "Glúteos",
+  gluteos: "Glúteos",
+};
+
+export function normalizeMuscleGroup(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const key = stripAccents(raw.trim().toLowerCase());
+  return MUSCLE_ALIASES[key] ?? null;
+}
+
+export function muscleVolumeZone(
+  muscle: string,
+  volumen: number,
+): "insuficiente" | "bajo" | "optimo" | "alto" | "excesivo" {
+  const lm = MUSCLE_LANDMARKS[muscle];
+  if (!lm) return "optimo";
+  if (volumen < lm.mev) return "insuficiente";
+  if (volumen < lm.mavLow) return "bajo";
+  if (volumen <= lm.mavHigh) return "optimo";
+  if (volumen <= lm.mrv) return "alto";
+  return "excesivo";
+}
+
+function mondayOf(d: Date): Date {
+  const dow = (d.getDay() + 6) % 7; // 0=lunes ... 6=domingo
+  const s = new Date(d);
+  s.setDate(d.getDate() - dow);
+  return s;
+}
+
+type MuscleExerciseInfo = { principal: string; secundarios: string[] };
+type MuscleSetRow = { fecha: string; exercise_id: string };
+
+// Volumen semanal (lunes-domingo) por grupo muscular con conteo fraccional:
+// cada serie completada suma 1.0 al músculo principal del ejercicio y 0.5 a
+// cada músculo secundario. Se calcula en el cliente sobre session_sets +
+// exercises ya existentes, sin tabla nueva de agregados.
+export function useMuscleVolume() {
+  const { user } = useAuth();
+  const [rows, setRows] = useState<MuscleSetRow[]>([]);
+  const [exerciseMuscles, setExerciseMuscles] = useState<Record<string, MuscleExerciseInfo>>({});
+  const [loading, setLoading] = useState(true);
+
+  const refresh = useCallback(async () => {
+    if (!user) {
+      setRows([]);
+      setExerciseMuscles({});
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    const [setsRes, exercisesRes] = await Promise.all([
+      supabase
+        .from("session_sets")
+        .select("exercise_id, session:session_id ( fecha )")
+        .eq("user_id", user.id),
+      supabase.from("exercises").select("id, grupo_muscular, musculos_secundarios").eq("user_id", user.id),
+    ]);
+
+    const flat: MuscleSetRow[] = ((setsRes.data ?? []) as any[])
+      .filter((r) => r.session?.fecha)
+      .map((r) => ({ fecha: r.session.fecha as string, exercise_id: r.exercise_id as string }));
+    setRows(flat);
+
+    const map: Record<string, MuscleExerciseInfo> = {};
+    for (const e of (exercisesRes.data ?? []) as any[]) {
+      map[e.id] = { principal: e.grupo_muscular, secundarios: e.musculos_secundarios ?? [] };
+    }
+    setExerciseMuscles(map);
+    setLoading(false);
+  }, [user]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  // weekStart (ISO, lunes) -> músculo canónico -> series (fraccionales)
+  const volumeByWeek = useMemo(() => {
+    const weeks = new Map<string, Record<string, number>>();
+    for (const r of rows) {
+      const info = exerciseMuscles[r.exercise_id];
+      if (!info) continue;
+      const key = toLocalISODate(mondayOf(new Date(`${r.fecha}T00:00:00`)));
+      const bucket = weeks.get(key) ?? {};
+
+      const principal = normalizeMuscleGroup(info.principal);
+      if (principal) bucket[principal] = (bucket[principal] ?? 0) + 1;
+
+      for (const sec of info.secundarios) {
+        const secNorm = normalizeMuscleGroup(sec);
+        if (secNorm && secNorm !== principal) bucket[secNorm] = (bucket[secNorm] ?? 0) + 0.5;
+      }
+
+      weeks.set(key, bucket);
+    }
+    return weeks;
+  }, [rows, exerciseMuscles]);
+
+  return { loading, volumeByWeek, refresh };
 }

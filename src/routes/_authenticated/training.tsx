@@ -6,6 +6,7 @@ import {
   Line,
   BarChart,
   Bar,
+  Cell,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -36,9 +37,14 @@ import {
   useTodayEntry,
   useTrainingProgress,
   useExerciseProgress,
+  useMuscleVolume,
   createExtraSession,
   todayISODate,
   toLocalISODate,
+  normalizeMuscleGroup,
+  muscleVolumeZone,
+  MUSCLE_LANDMARKS,
+  MUSCLE_ORDER,
   type PersonalProfile,
   type PersonalProfileInput,
   type RoutineDayWithDetails,
@@ -1313,6 +1319,152 @@ function WeeklyLoadTooltip({ active, payload }: any) {
   );
 }
 
+function mondayISO(d: Date): string {
+  const dow = (d.getDay() + 6) % 7; // 0=lunes ... 6=domingo
+  const s = new Date(d);
+  s.setDate(d.getDate() - dow);
+  return toLocalISODate(s);
+}
+function addDaysISO(iso: string, n: number): string {
+  const d = new Date(`${iso}T00:00:00`);
+  d.setDate(d.getDate() + n);
+  return toLocalISODate(d);
+}
+
+const MUSCLE_ZONE_COLOR: Record<string, string> = {
+  insuficiente: "#fb7185",
+  bajo: "#fcd34d",
+  optimo: "#10b981",
+  alto: "#f97316",
+  excesivo: "#dc2626",
+};
+const MUSCLE_ZONE_LABEL: Record<string, string> = {
+  insuficiente: "Insuficiente",
+  bajo: "Por debajo del óptimo",
+  optimo: "Óptimo",
+  alto: "Por encima del óptimo",
+  excesivo: "Excesivo",
+};
+const MUSCLE_ZONE_ORDER = ["insuficiente", "bajo", "optimo", "alto", "excesivo"] as const;
+
+function MuscleVolumeTooltip({ active, payload }: any) {
+  if (!active || !payload || !payload.length) return null;
+  const p = payload[0].payload as { muscle: string; volumen: number; zone: string };
+  const lm = MUSCLE_LANDMARKS[p.muscle];
+  return (
+    <div className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-slate-200 shadow-lg">
+      <div className="font-semibold text-white">{p.muscle}</div>
+      <div className="mt-0.5 text-slate-400">
+        {p.volumen.toFixed(1)} series · {MUSCLE_ZONE_LABEL[p.zone]}
+      </div>
+      {lm && (
+        <div className="mt-0.5 text-slate-500">
+          MEV {lm.mev} · MAV {lm.mavLow}-{lm.mavHigh} · MRV {lm.mrv}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MuscleVolumeSection() {
+  const { loading, volumeByWeek } = useMuscleVolume();
+  const [weekStart, setWeekStart] = useState(() => mondayISO(new Date()));
+  const isCurrentWeek = weekStart === mondayISO(new Date());
+
+  const chartData = useMemo(() => {
+    const bucket = volumeByWeek.get(weekStart) ?? {};
+    return MUSCLE_ORDER.map((m) => {
+      const volumen = bucket[m] ?? 0;
+      return { muscle: m, volumen, zone: muscleVolumeZone(m, volumen) };
+    });
+  }, [volumeByWeek, weekStart]);
+
+  const hasAnyData = chartData.some((d) => d.volumen > 0);
+
+  return (
+    <section className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+      <p className="mb-3 text-[10.5px] font-bold uppercase tracking-widest text-emerald-400">
+        Volumen semanal por grupo muscular
+      </p>
+      <div className="mb-3 flex items-center justify-between">
+        <button
+          type="button"
+          onClick={() => setWeekStart((w) => addDaysISO(w, -7))}
+          aria-label="Semana anterior"
+          className="grid h-7 w-7 place-items-center rounded-lg border border-slate-800 bg-slate-950 text-slate-300 transition hover:border-emerald-500 hover:text-white"
+        >
+          <ChevronLeft className="h-3.5 w-3.5" />
+        </button>
+        <span className="text-xs font-semibold text-white">
+          Semana del {formatShortDate(weekStart)} al {formatShortDate(addDaysISO(weekStart, 6))}
+        </span>
+        <button
+          type="button"
+          onClick={() => setWeekStart((w) => addDaysISO(w, 7))}
+          disabled={isCurrentWeek}
+          aria-label="Semana siguiente"
+          className="grid h-7 w-7 place-items-center rounded-lg border border-slate-800 bg-slate-950 text-slate-300 transition hover:border-emerald-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+        >
+          <ChevronRight className="h-3.5 w-3.5" />
+        </button>
+      </div>
+
+      {loading ? (
+        <p className="py-4 text-center text-xs text-slate-500">Cargando…</p>
+      ) : !hasAnyData ? (
+        <p className="py-4 text-center text-xs text-slate-500">
+          No hay series registradas con músculo reconocido esta semana.
+        </p>
+      ) : (
+        <div className="h-64 w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={chartData} margin={{ top: 8, right: 8, left: -18, bottom: 20 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgb(30 41 59)" />
+              <XAxis
+                dataKey="muscle"
+                tick={{ fill: "rgb(148 163 184)", fontSize: 10 }}
+                axisLine={{ stroke: "rgb(51 65 85)" }}
+                tickLine={false}
+                interval={0}
+                angle={-30}
+                textAnchor="end"
+                height={50}
+              />
+              <YAxis
+                tick={{ fill: "rgb(148 163 184)", fontSize: 11 }}
+                axisLine={{ stroke: "rgb(51 65 85)" }}
+                tickLine={false}
+                width={30}
+              />
+              <RTooltip content={<MuscleVolumeTooltip />} />
+              <Bar dataKey="volumen" radius={[4, 4, 0, 0]}>
+                {chartData.map((entry, i) => (
+                  <Cell key={i} fill={MUSCLE_ZONE_COLOR[entry.zone]} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      <div className="mt-3 flex flex-wrap gap-3 text-[10.5px] text-slate-500">
+        {MUSCLE_ZONE_ORDER.map((z) => (
+          <span key={z} className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: MUSCLE_ZONE_COLOR[z] }} />
+            {MUSCLE_ZONE_LABEL[z]}
+          </span>
+        ))}
+      </div>
+      <p className="mt-2 text-[11px] text-slate-600">
+        Volumen fraccional: cada serie suma 1 al músculo principal del ejercicio y 0.5 a cada músculo secundario.
+        Los grupos musculares sin tabla de referencia no se incluyen aquí. Los valores de MEV/MAV/MRV son puntos de
+        partida generales, no individualizados, y no tienen en cuenta la proximidad al fallo por serie (el esfuerzo
+        se registra a nivel de sesión completa, no por serie).
+      </p>
+    </section>
+  );
+}
+
 function ProgresoView({
   onBack,
   progress,
@@ -1518,6 +1670,8 @@ function ProgresoView({
             </>
           )}
         </section>
+
+        <MuscleVolumeSection />
       </div>
     </div>
   );
@@ -1634,6 +1788,7 @@ function DayEditor({
           <AddExerciseForm
             exercises={routine.exercises}
             onCreateExercise={routine.createExercise}
+            onUpdateExercise={routine.updateExercise}
             onAdd={async (exerciseId, opts) => {
               await routine.addExerciseToDay(day.id, exerciseId, opts);
               setAddingExercise(false);
@@ -1767,14 +1922,140 @@ function RoutineExerciseRow({
   );
 }
 
+function SecondaryMusclesPicker({
+  value,
+  onChange,
+  exclude,
+}: {
+  value: string[];
+  onChange: (v: string[]) => void;
+  exclude?: string | null;
+}) {
+  const options = MUSCLE_ORDER.filter((m) => m !== exclude);
+  function toggle(m: string) {
+    onChange(value.includes(m) ? value.filter((v) => v !== m) : [...value, m]);
+  }
+  return (
+    <div className="space-y-1.5">
+      <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+        Músculos secundarios (opcional, cuentan 0.5 series en el volumen)
+      </label>
+      <div className="flex flex-wrap gap-1.5">
+        {options.map((m) => (
+          <button
+            key={m}
+            type="button"
+            onClick={() => toggle(m)}
+            className={
+              "rounded-full border px-2.5 py-1 text-[11px] font-medium transition " +
+              (value.includes(m)
+                ? "border-indigo-500 bg-indigo-500/15 text-indigo-300"
+                : "border-slate-800 text-slate-400 hover:text-white")
+            }
+          >
+            {m}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function EditExerciseMuscles({
+  exercise,
+  onSave,
+}: {
+  exercise: ExerciseRow;
+  onSave: (patch: { grupo_muscular: string; musculos_secundarios: string[] }) => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [grupo, setGrupo] = useState(exercise.grupo_muscular);
+  const [secundarios, setSecundarios] = useState<string[]>(exercise.musculos_secundarios);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setGrupo(exercise.grupo_muscular);
+    setSecundarios(exercise.musculos_secundarios);
+    setSaved(false);
+    setOpen(false);
+  }, [exercise.id]);
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="text-[11px] font-medium text-slate-500 underline decoration-dotted hover:text-slate-300"
+      >
+        Editar músculos de este ejercicio
+      </button>
+    );
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      await onSave({ grupo_muscular: grupo.trim(), musculos_secundarios: secundarios });
+      setSaved(true);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const principalNorm = normalizeMuscleGroup(grupo);
+
+  return (
+    <div className="space-y-2.5 rounded-lg border border-slate-800 bg-slate-900/60 p-3">
+      <Field label="Músculo principal">
+        <input
+          value={grupo}
+          onChange={(e) => {
+            setGrupo(e.target.value);
+            setSaved(false);
+          }}
+          className={inputCls}
+        />
+      </Field>
+      <SecondaryMusclesPicker
+        value={secundarios}
+        onChange={(v) => {
+          setSecundarios(v);
+          setSaved(false);
+        }}
+        exclude={principalNorm}
+      />
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saving}
+          className="rounded-lg bg-indigo-500 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-indigo-400 disabled:opacity-60"
+        >
+          {saving ? "Guardando…" : "Guardar cambios"}
+        </button>
+        {saved && <span className="text-[11px] text-emerald-400">Guardado.</span>}
+      </div>
+    </div>
+  );
+}
+
 function AddExerciseForm({
   exercises,
   onCreateExercise,
+  onUpdateExercise,
   onAdd,
   onCancel,
 }: {
   exercises: ExerciseRow[];
-  onCreateExercise: (input: { nombre: string; grupo_muscular: string; tipo: "fuerza" | "movilidad" | "cardio"; notas?: string | null }) => Promise<ExerciseRow>;
+  onCreateExercise: (input: {
+    nombre: string;
+    grupo_muscular: string;
+    tipo: "fuerza" | "movilidad" | "cardio";
+    notas?: string | null;
+    musculos_secundarios?: string[];
+  }) => Promise<ExerciseRow>;
+  onUpdateExercise: (id: string, patch: { grupo_muscular: string; musculos_secundarios: string[] }) => Promise<void>;
   onAdd: (exerciseId: string, opts: { series_objetivo: string; reps_objetivo: string; peso_objetivo_kg?: number | null }) => Promise<void>;
   onCancel: () => void;
 }) {
@@ -1783,11 +2064,14 @@ function AddExerciseForm({
   const [nombre, setNombre] = useState("");
   const [grupoMuscular, setGrupoMuscular] = useState("");
   const [tipo, setTipo] = useState<"fuerza" | "movilidad" | "cardio">("fuerza");
+  const [nuevoSecundarios, setNuevoSecundarios] = useState<string[]>([]);
   const [series, setSeries] = useState("3-4");
   const [reps, setReps] = useState("10-12");
   const [peso, setPeso] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const selectedExercise = exercises.find((e) => e.id === exerciseId) ?? null;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -1803,6 +2087,7 @@ function AddExerciseForm({
           nombre: nombre.trim(),
           grupo_muscular: grupoMuscular.trim(),
           tipo,
+          musculos_secundarios: nuevoSecundarios,
         });
         idToUse = created.id;
       }
@@ -1854,37 +2139,53 @@ function AddExerciseForm({
             Todavía no tienes ejercicios en tu biblioteca. Crea uno nuevo.
           </p>
         ) : (
-          <select
-            value={exerciseId}
-            onChange={(e) => setExerciseId(e.target.value)}
-            className={inputCls}
-          >
-            {exercises.map((ex) => (
-              <option key={ex.id} value={ex.id}>
-                {ex.nombre} — {ex.grupo_muscular}
-              </option>
-            ))}
-          </select>
+          <div className="space-y-2">
+            <select
+              value={exerciseId}
+              onChange={(e) => setExerciseId(e.target.value)}
+              className={inputCls}
+            >
+              {exercises.map((ex) => (
+                <option key={ex.id} value={ex.id}>
+                  {ex.nombre} — {ex.grupo_muscular}
+                </option>
+              ))}
+            </select>
+            {selectedExercise && (
+              <EditExerciseMuscles
+                key={selectedExercise.id}
+                exercise={selectedExercise}
+                onSave={(patch) => onUpdateExercise(selectedExercise.id, patch)}
+              />
+            )}
+          </div>
         )
       ) : (
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          <input
-            value={nombre}
-            onChange={(e) => setNombre(e.target.value)}
-            placeholder="Nombre del ejercicio"
-            className={inputCls}
+        <div className="space-y-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <input
+              value={nombre}
+              onChange={(e) => setNombre(e.target.value)}
+              placeholder="Nombre del ejercicio"
+              className={inputCls}
+            />
+            <input
+              value={grupoMuscular}
+              onChange={(e) => setGrupoMuscular(e.target.value)}
+              placeholder="Grupo muscular"
+              className={inputCls}
+            />
+            <select value={tipo} onChange={(e) => setTipo(e.target.value as typeof tipo)} className={inputCls}>
+              <option value="fuerza">Fuerza</option>
+              <option value="movilidad">Movilidad</option>
+              <option value="cardio">Cardio</option>
+            </select>
+          </div>
+          <SecondaryMusclesPicker
+            value={nuevoSecundarios}
+            onChange={setNuevoSecundarios}
+            exclude={normalizeMuscleGroup(grupoMuscular)}
           />
-          <input
-            value={grupoMuscular}
-            onChange={(e) => setGrupoMuscular(e.target.value)}
-            placeholder="Grupo muscular"
-            className={inputCls}
-          />
-          <select value={tipo} onChange={(e) => setTipo(e.target.value as typeof tipo)} className={inputCls}>
-            <option value="fuerza">Fuerza</option>
-            <option value="movilidad">Movilidad</option>
-            <option value="cardio">Cardio</option>
-          </select>
         </div>
       )}
 
