@@ -385,9 +385,19 @@ function HoyView({
     try {
       if (row.reps_realizadas == null && row.peso_realizado_kg == null) {
         await entry.removeSet(exerciseId, row);
-      } else {
-        await entry.saveSet(exerciseId, row);
+        return;
       }
+      const saved = await entry.saveSet(exerciseId, row);
+      // Propaga el id real devuelto por saveSet de vuelta a draftSets: si no
+      // se hace, la fila se queda con id null para siempre y cada blur
+      // posterior (p.ej. el del otro campo de la misma serie) vuelve a
+      // insertar en vez de actualizar, duplicando la serie en session_sets.
+      setDraftSets((prev) => {
+        const rows = prev[exerciseId] ?? [];
+        const idx = rows.findIndex((r) => r.numero_serie === row.numero_serie);
+        if (idx < 0) return prev;
+        return { ...prev, [exerciseId]: rows.map((r, i) => (i === idx ? { ...r, id: saved.id } : r)) };
+      });
     } catch (err) {
       toast.error((err as Error).message || "No se pudo guardar la serie.");
     }

@@ -413,7 +413,7 @@ export function useTodayEntry(routineDayId: string | null) {
   // devuelto para que la siguiente edición de esa misma fila actualice en
   // vez de insertar otra. Se llama al momento, por cada serie.
   const saveSet = useCallback(
-    async (exerciseId: string, row: SessionSetDraft) => {
+    async (exerciseId: string, row: SessionSetDraft): Promise<SessionSetDraft> => {
       if (!user) throw new Error("No hay sesión activa.");
       const sid = await ensureSession();
       let rowId = row.id ?? null;
@@ -449,6 +449,7 @@ export function useTodayEntry(routineDayId: string | null) {
             : [...rows, saved].sort((a, b) => a.numero_serie - b.numero_serie);
         return { ...prev, [exerciseId]: next };
       });
+      return saved;
     },
     [user, ensureSession],
   );
