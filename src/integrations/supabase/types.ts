@@ -672,7 +672,9 @@ export type Database = {
         Row: {
           completado: boolean
           creado_en: string
+          duracion_min: number | null
           es_extra: boolean
+          esfuerzo_percibido: number | null
           fecha: string
           id: string
           notas: string | null
@@ -682,7 +684,9 @@ export type Database = {
         Insert: {
           completado?: boolean
           creado_en?: string
+          duracion_min?: number | null
           es_extra?: boolean
+          esfuerzo_percibido?: number | null
           fecha: string
           id?: string
           notas?: string | null
@@ -692,7 +696,9 @@ export type Database = {
         Update: {
           completado?: boolean
           creado_en?: string
+          duracion_min?: number | null
           es_extra?: boolean
+          esfuerzo_percibido?: number | null
           fecha?: string
           id?: string
           notas?: string | null

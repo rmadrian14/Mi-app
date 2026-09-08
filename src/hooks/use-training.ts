@@ -277,6 +277,8 @@ export function useTodayEntry(routineDayId: string | null) {
   const fecha = todayISODate();
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [completado, setCompletado] = useState(false);
+  const [esfuerzoPercibido, setEsfuerzoPercibido] = useState<number | null>(null);
+  const [duracionMin, setDuracionMin] = useState<number | null>(null);
   const [setsByExercise, setSetsByExercise] = useState<Record<string, SessionSetDraft[]>>({});
   const [habits, setHabits] = useState<Partial<Record<"movilidad" | "caminata", HabitLog>>>({});
   const [loading, setLoading] = useState(true);
@@ -285,6 +287,8 @@ export function useTodayEntry(routineDayId: string | null) {
     if (!user) {
       setSessionId(null);
       setCompletado(false);
+      setEsfuerzoPercibido(null);
+      setDuracionMin(null);
       setSetsByExercise({});
       setHabits({});
       setLoading(false);
@@ -298,7 +302,7 @@ export function useTodayEntry(routineDayId: string | null) {
       // (edge case de pruebas), nos quedamos con la más antigua.
       supabase
         .from("training_sessions")
-        .select("id, completado")
+        .select("id, completado, esfuerzo_percibido, duracion_min")
         .eq("user_id", user.id)
         .eq("fecha", fecha)
         .order("creado_en", { ascending: true })
@@ -311,9 +315,16 @@ export function useTodayEntry(routineDayId: string | null) {
         .eq("fecha", fecha),
     ]);
 
-    const session = sessionRes.data as { id: string; completado: boolean } | null;
+    const session = sessionRes.data as {
+      id: string;
+      completado: boolean;
+      esfuerzo_percibido: number | null;
+      duracion_min: number | null;
+    } | null;
     setSessionId(session?.id ?? null);
     setCompletado(session?.completado ?? false);
+    setEsfuerzoPercibido(session?.esfuerzo_percibido ?? null);
+    setDuracionMin(session?.duracion_min ?? null);
 
     if (session) {
       const { data: sets } = await supabase
@@ -457,18 +468,32 @@ export function useTodayEntry(routineDayId: string | null) {
   }, []);
 
   // Marca la sesión de hoy como completada (creándola primero si aún no
-  // existe, p.ej. si el usuario no ha registrado ninguna serie).
-  const markCompleted = useCallback(async () => {
-    const sid = await ensureSession();
-    const { error } = await supabase.from("training_sessions").update({ completado: true }).eq("id", sid);
-    if (error) throw error;
-    setCompletado(true);
-  }, [ensureSession]);
+  // existe, p.ej. si el usuario no ha registrado ninguna serie), guardando
+  // de paso el esfuerzo percibido (RPE 0-10) y la duración (minutos) si se
+  // han indicado. Ambos son opcionales: se puede completar sin valorarlos.
+  const markCompleted = useCallback(
+    async (payload?: { esfuerzo_percibido: number | null; duracion_min: number | null }) => {
+      const sid = await ensureSession();
+      const esfuerzo_percibido = payload?.esfuerzo_percibido ?? null;
+      const duracion_min = payload?.duracion_min ?? null;
+      const { error } = await supabase
+        .from("training_sessions")
+        .update({ completado: true, esfuerzo_percibido, duracion_min })
+        .eq("id", sid);
+      if (error) throw error;
+      setCompletado(true);
+      setEsfuerzoPercibido(esfuerzo_percibido);
+      setDuracionMin(duracion_min);
+    },
+    [ensureSession],
+  );
 
   return {
     fecha,
     sessionId,
     completado,
+    esfuerzoPercibido,
+    duracionMin,
     setsByExercise,
     habits,
     loading,
@@ -481,15 +506,26 @@ export function useTodayEntry(routineDayId: string | null) {
 }
 
 // Crea un entrenamiento fuera de plan (es_extra=true) con sus series, para
-// cualquier fecha. No es un hook: se invoca puntualmente desde el formulario.
+// cualquier fecha, con el mismo esfuerzo percibido y duración opcionales que
+// en la sesión planificada. No es un hook: se invoca puntualmente desde el
+// formulario.
 export async function createExtraSession(
   userId: string,
   fecha: string,
   setsByExercise: Record<string, SessionSetDraft[]>,
+  esfuerzoDuracion?: { esfuerzo_percibido: number | null; duracion_min: number | null },
 ): Promise<void> {
   const { data: session, error } = await supabase
     .from("training_sessions")
-    .insert({ user_id: userId, fecha, routine_day_id: null, es_extra: true, completado: true })
+    .insert({
+      user_id: userId,
+      fecha,
+      routine_day_id: null,
+      es_extra: true,
+      completado: true,
+      esfuerzo_percibido: esfuerzoDuracion?.esfuerzo_percibido ?? null,
+      duracion_min: esfuerzoDuracion?.duracion_min ?? null,
+    })
     .select("id")
     .single();
   if (error) throw error;
@@ -520,13 +556,23 @@ export type CalendarDayInfo = {
   fecha: string;
   status: DayStatus;
   extra: boolean;
+  // Suma de esfuerzo_percibido × duracion_min de las sesiones completadas de
+  // ese día (null si ninguna tiene ambos valores registrados).
+  carga: number | null;
 };
 
-type SessionSummaryRow = {
+export type SessionSummaryRow = {
   fecha: string;
   routine_day_id: string | null;
   es_extra: boolean;
   completado: boolean;
+  esfuerzo_percibido: number | null;
+  duracion_min: number | null;
+};
+
+export type WeeklyLoadPoint = {
+  weekStart: string;
+  carga: number;
 };
 
 // Racha actual y mejor racha histórica, más el estado de cada día (para
@@ -551,7 +597,7 @@ export function useTrainingProgress() {
     setLoading(true);
     const { data } = await supabase
       .from("training_sessions")
-      .select("fecha, routine_day_id, es_extra, completado")
+      .select("fecha, routine_day_id, es_extra, completado, esfuerzo_percibido, duracion_min")
       .eq("user_id", user.id)
       .lte("fecha", todayISODate())
       .order("fecha");
@@ -564,6 +610,31 @@ export function useTrainingProgress() {
   }, [refresh]);
 
   const ready = !profileLoading && !routineLoading && !loading && !!profile;
+
+  const sessionsByDate = useMemo(() => {
+    const map = new Map<string, SessionSummaryRow[]>();
+    for (const s of sessions) {
+      if (!map.has(s.fecha)) map.set(s.fecha, []);
+      map.get(s.fecha)!.push(s);
+    }
+    return map;
+  }, [sessions]);
+
+  const weeklyLoad = useMemo<WeeklyLoadPoint[]>(() => {
+    const buckets = new Map<string, number>();
+    for (const s of sessions) {
+      if (!s.completado || s.esfuerzo_percibido == null || s.duracion_min == null) continue;
+      const d = new Date(`${s.fecha}T00:00:00`);
+      const dow = (d.getDay() + 6) % 7; // 0=lunes ... 6=domingo
+      const weekStart = new Date(d);
+      weekStart.setDate(d.getDate() - dow);
+      const key = toLocalISODate(weekStart);
+      buckets.set(key, (buckets.get(key) ?? 0) + s.esfuerzo_percibido * s.duracion_min);
+    }
+    return Array.from(buckets.entries())
+      .map(([weekStart, carga]) => ({ weekStart, carga }))
+      .sort((a, b) => a.weekStart.localeCompare(b.weekStart));
+  }, [sessions]);
 
   const { currentStreak, bestStreak, statusByDate } = useMemo(() => {
     const statusByDate = new Map<string, CalendarDayInfo>();
@@ -606,14 +677,30 @@ export function useTrainingProgress() {
         running = 0;
       }
 
-      statusByDate.set(iso, { fecha: iso, status, extra: hasExtra });
+      const daySessions = sessionsByDate.get(iso) ?? [];
+      const cargaSessions = daySessions.filter(
+        (s) => s.completado && s.esfuerzo_percibido != null && s.duracion_min != null,
+      );
+      const carga = cargaSessions.length
+        ? cargaSessions.reduce((sum, s) => sum + s.esfuerzo_percibido! * s.duracion_min!, 0)
+        : null;
+
+      statusByDate.set(iso, { fecha: iso, status, extra: hasExtra, carga });
       cursor.setDate(cursor.getDate() + 1);
     }
 
     return { currentStreak: running, bestStreak: best, statusByDate };
-  }, [ready, profile, routineDays, sessions]);
+  }, [ready, profile, routineDays, sessions, sessionsByDate]);
 
-  return { loading: !ready, currentStreak, bestStreak, statusByDate, refresh };
+  return {
+    loading: !ready,
+    currentStreak,
+    bestStreak,
+    statusByDate,
+    sessionsByDate,
+    weeklyLoad,
+    refresh,
+  };
 }
 
 /* ------------------------------ Progresión y récords (e1RM) ------------------------------ */

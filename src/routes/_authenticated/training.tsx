@@ -4,6 +4,8 @@ import { toast } from "sonner";
 import {
   LineChart,
   Line,
+  BarChart,
+  Bar,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -45,6 +47,8 @@ import {
   type SessionSetDraft,
   type DayStatus,
   type CalendarDayInfo,
+  type SessionSummaryRow,
+  type WeeklyLoadPoint,
   type ProgressPoint,
 } from "@/hooks/use-training";
 
@@ -84,7 +88,7 @@ function TrainingPage() {
     return <CalendarioView onBack={() => setView("hoy")} progress={progress} />;
   }
   if (view === "progreso") {
-    return <ProgresoView onBack={() => setView("hoy")} />;
+    return <ProgresoView onBack={() => setView("hoy")} progress={progress} />;
   }
   return (
     <HoyView
@@ -231,6 +235,92 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 const inputCls =
   "w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20";
 
+/* ------------------------------ Esfuerzo percibido (RPE/RIR) y duración ------------------------------ */
+
+// Escala 0-10 basada en reps en reserva (RIR), adaptada de Zourdos et al.
+// (2016): por encima de RPE 5 el ancla es literal en RIR (10=0RIR ... 7=3RIR),
+// 5-6 se agrupan como 4-6 RIR (más allá de eso ya no es fiable distinguir el
+// número exacto), y por debajo de 5 se usan descriptores de esfuerzo, no RIR.
+const RPE_DESCRIPTIONS: Record<number, string> = {
+  0: "Sin esfuerzo (calentamiento)",
+  1: "Muy, muy ligero",
+  2: "Muy ligero",
+  3: "Ligero",
+  4: "Moderado, cómodo",
+  5: "Algo duro — 4-6 reps más",
+  6: "Algo duro — 4-6 reps más",
+  7: "Duro — unas 3 reps más",
+  8: "Muy duro — 2 reps más",
+  9: "Casi al límite — 1 rep más",
+  10: "Al fallo — 0 reps más",
+};
+
+// Campos compartidos entre "Marcar como completado" (Hoy) y "Entrenamiento
+// extra": esfuerzo percibido (RPE 0-10) + duración (minutos), con la carga
+// de sesión (esfuerzo × duración) calculada en vivo. Ambos opcionales.
+function EsfuerzoDuracionFields({
+  esfuerzo,
+  onEsfuerzoChange,
+  duracion,
+  onDuracionChange,
+}: {
+  esfuerzo: number | null;
+  onEsfuerzoChange: (v: number | null) => void;
+  duracion: string;
+  onDuracionChange: (v: string) => void;
+}) {
+  const duracionNum = duracion.trim() ? parseInt(duracion, 10) : null;
+  const carga = esfuerzo != null && duracionNum ? esfuerzo * duracionNum : null;
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between">
+          <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+            Esfuerzo percibido (0-10)
+          </label>
+          {esfuerzo != null && (
+            <button
+              type="button"
+              onClick={() => onEsfuerzoChange(null)}
+              className="text-[10px] text-slate-500 hover:text-slate-300"
+            >
+              Quitar
+            </button>
+          )}
+        </div>
+        <input
+          type="range"
+          min={0}
+          max={10}
+          step={1}
+          value={esfuerzo ?? 5}
+          onChange={(e) => onEsfuerzoChange(parseInt(e.target.value, 10))}
+          className="w-full accent-emerald-500"
+        />
+        <p className="text-xs text-slate-400">
+          {esfuerzo == null ? "Desliza para valorar (opcional)" : `${esfuerzo} · ${RPE_DESCRIPTIONS[esfuerzo]}`}
+        </p>
+      </div>
+      <Field label="Duración (minutos)">
+        <input
+          type="number"
+          min={1}
+          placeholder="Ej. 52"
+          value={duracion}
+          onChange={(e) => onDuracionChange(e.target.value)}
+          className={inputCls}
+        />
+      </Field>
+      {carga != null && (
+        <p className="text-xs text-slate-400">
+          Carga de sesión: {esfuerzo} × {duracionNum} min ={" "}
+          <span className="font-semibold text-emerald-400">{carga}</span>
+        </p>
+      )}
+    </div>
+  );
+}
+
 /* ------------------------------ Hoy ------------------------------ */
 
 function parseLeadingNumber(s: string | null | undefined): number | null {
@@ -278,6 +368,9 @@ function HoyView({
   const [draftSets, setDraftSets] = useState<Record<string, SessionSetDraft[]>>({});
   const [completing, setCompleting] = useState(false);
   const [showExtra, setShowExtra] = useState(false);
+  const [showWrapUp, setShowWrapUp] = useState(false);
+  const [wrapUpEsfuerzo, setWrapUpEsfuerzo] = useState<number | null>(null);
+  const [wrapUpDuracion, setWrapUpDuracion] = useState("");
 
   useEffect(() => {
     if (!today || entry.loading) return;
@@ -308,11 +401,19 @@ function HoyView({
     }
   }
 
+  function openWrapUp() {
+    setWrapUpEsfuerzo(entry.esfuerzoPercibido);
+    setWrapUpDuracion(entry.duracionMin != null ? String(entry.duracionMin) : "");
+    setShowWrapUp(true);
+  }
+
   async function handleComplete() {
     setCompleting(true);
     try {
-      await entry.markCompleted();
+      const duracion_min = wrapUpDuracion.trim() ? parseInt(wrapUpDuracion, 10) : null;
+      await entry.markCompleted({ esfuerzo_percibido: wrapUpEsfuerzo, duracion_min });
       toast.success("Entrenamiento de hoy marcado como completado.");
+      setShowWrapUp(false);
     } catch (err) {
       toast.error((err as Error).message || "No se pudo marcar como completado.");
     } finally {
@@ -402,17 +503,57 @@ function HoyView({
             {today && <HabitChecklist day={today} entry={entry} />}
 
             {today?.es_dia_entreno && (
-              <button
-                onClick={handleComplete}
-                disabled={completing}
-                className="mt-4 w-full rounded-lg bg-gradient-to-r from-emerald-500 to-indigo-500 py-2.5 text-sm font-bold text-white shadow-lg shadow-emerald-500/20 transition hover:opacity-90 disabled:opacity-60"
-              >
-                {completing
-                  ? "Guardando…"
-                  : entry.completado
-                    ? "Entrenamiento completado ✓"
-                    : "Marcar entrenamiento como completado"}
-              </button>
+              <>
+                {showWrapUp ? (
+                  <div className="mt-4 space-y-4 rounded-2xl border border-slate-800 bg-slate-900 p-5">
+                    <p className="text-sm font-semibold text-white">¿Cómo ha ido el entrenamiento?</p>
+                    <EsfuerzoDuracionFields
+                      esfuerzo={wrapUpEsfuerzo}
+                      onEsfuerzoChange={setWrapUpEsfuerzo}
+                      duracion={wrapUpDuracion}
+                      onDuracionChange={setWrapUpDuracion}
+                    />
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowWrapUp(false)}
+                        className="rounded-lg border border-slate-800 px-3 py-2 text-xs font-medium text-slate-400 hover:text-white"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleComplete}
+                        disabled={completing}
+                        className="rounded-lg bg-gradient-to-r from-emerald-500 to-indigo-500 px-4 py-2 text-sm font-bold text-white shadow-lg shadow-emerald-500/20 transition hover:opacity-90 disabled:opacity-60"
+                      >
+                        {completing ? "Guardando…" : "Guardar y marcar completado"}
+                      </button>
+                    </div>
+                  </div>
+                ) : entry.completado ? (
+                  <button
+                    onClick={openWrapUp}
+                    className="mt-4 flex w-full items-center justify-between rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-sm text-emerald-200 transition hover:border-emerald-500/50"
+                  >
+                    <span>
+                      Entrenamiento completado ✓
+                      {entry.esfuerzoPercibido != null && ` · RPE ${entry.esfuerzoPercibido}`}
+                      {entry.duracionMin != null && ` · ${entry.duracionMin} min`}
+                      {entry.esfuerzoPercibido != null && entry.duracionMin != null &&
+                        ` · carga ${entry.esfuerzoPercibido * entry.duracionMin}`}
+                    </span>
+                    <Pencil className="h-3.5 w-3.5 shrink-0" />
+                  </button>
+                ) : (
+                  <button
+                    onClick={openWrapUp}
+                    className="mt-4 w-full rounded-lg bg-gradient-to-r from-emerald-500 to-indigo-500 py-2.5 text-sm font-bold text-white shadow-lg shadow-emerald-500/20 transition hover:opacity-90"
+                  >
+                    Marcar entrenamiento como completado
+                  </button>
+                )}
+              </>
             )}
 
             {!showExtra ? (
@@ -427,8 +568,8 @@ function HoyView({
                 <ExtraWorkoutForm
                   exercises={routine.exercises}
                   onCreateExercise={routine.createExercise}
-                  onSubmit={async (fecha, sets) => {
-                    await createExtraSession(user.id, fecha, sets);
+                  onSubmit={async (fecha, sets, esfuerzoDuracion) => {
+                    await createExtraSession(user.id, fecha, sets, esfuerzoDuracion);
                     toast.success("Entrenamiento extra guardado.");
                     setShowExtra(false);
                     if (fecha === todayISODate()) entry.refresh();
@@ -653,7 +794,11 @@ function ExtraWorkoutForm({
 }: {
   exercises: ExerciseRow[];
   onCreateExercise: (input: { nombre: string; grupo_muscular: string; tipo: "fuerza" | "movilidad" | "cardio" }) => Promise<ExerciseRow>;
-  onSubmit: (fecha: string, setsByExercise: Record<string, SessionSetDraft[]>) => Promise<void>;
+  onSubmit: (
+    fecha: string,
+    setsByExercise: Record<string, SessionSetDraft[]>,
+    esfuerzoDuracion: { esfuerzo_percibido: number | null; duracion_min: number | null },
+  ) => Promise<void>;
   onCancel: () => void;
 }) {
   const [fecha, setFecha] = useState(todayISODate());
@@ -663,6 +808,8 @@ function ExtraWorkoutForm({
   const [newNombre, setNewNombre] = useState("");
   const [newGrupo, setNewGrupo] = useState("");
   const [newTipo, setNewTipo] = useState<"fuerza" | "movilidad" | "cardio">("fuerza");
+  const [esfuerzo, setEsfuerzo] = useState<number | null>(null);
+  const [duracion, setDuracion] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -713,7 +860,8 @@ function ExtraWorkoutForm({
     try {
       const setsByExercise: Record<string, SessionSetDraft[]> = {};
       for (const b of selected) setsByExercise[b.exerciseId] = b.sets;
-      await onSubmit(fecha, setsByExercise);
+      const duracion_min = duracion.trim() ? parseInt(duracion, 10) : null;
+      await onSubmit(fecha, setsByExercise, { esfuerzo_percibido: esfuerzo, duracion_min });
     } catch (err) {
       setError((err as Error).message || "No se pudo guardar el entrenamiento.");
     } finally {
@@ -832,6 +980,15 @@ function ExtraWorkoutForm({
         </div>
       )}
 
+      <div className="rounded-lg border border-slate-800 bg-slate-950 p-3">
+        <EsfuerzoDuracionFields
+          esfuerzo={esfuerzo}
+          onEsfuerzoChange={setEsfuerzo}
+          duracion={duracion}
+          onDuracionChange={setDuracion}
+        />
+      </div>
+
       {error && <p className="text-xs text-rose-400">{error}</p>}
 
       <button
@@ -852,6 +1009,11 @@ const MESES_LABEL = [
   "enero", "febrero", "marzo", "abril", "mayo", "junio",
   "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
 ];
+
+function formatLongDate(iso: string): string {
+  const [y, m, d] = iso.split("-").map((v) => parseInt(v, 10));
+  return `${d} de ${MESES_LABEL[m - 1]} de ${y}`;
+}
 
 // Rejilla del mes en semanas de lunes a domingo: null para los huecos antes
 // del día 1 y después del último día.
@@ -893,9 +1055,12 @@ function CalendarioView({
   const now = new Date();
   const [viewYear, setViewYear] = useState(now.getFullYear());
   const [viewMonth, setViewMonth] = useState(now.getMonth());
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
   const isCurrentMonth = viewYear === now.getFullYear() && viewMonth === now.getMonth();
   const grid = useMemo(() => buildMonthGrid(viewYear, viewMonth), [viewYear, viewMonth]);
+  const selectedInfo = selectedDate ? progress.statusByDate.get(selectedDate) : undefined;
+  const selectedSessions = selectedDate ? progress.sessionsByDate.get(selectedDate) ?? [] : [];
 
   function prevMonth() {
     if (viewMonth === 0) {
@@ -993,20 +1158,24 @@ function CalendarioView({
                 const info: CalendarDayInfo | undefined = progress.statusByDate.get(iso);
                 const dayNum = parseInt(iso.split("-")[2], 10);
                 const isToday = iso === todayISODate();
+                const isSelected = iso === selectedDate;
                 return (
-                  <div
+                  <button
+                    type="button"
                     key={iso}
+                    onClick={() => setSelectedDate((cur) => (cur === iso ? null : iso))}
                     className={
-                      "relative flex h-11 items-center justify-center rounded-lg border text-sm font-semibold " +
+                      "relative flex h-11 items-center justify-center rounded-lg border text-sm font-semibold transition " +
                       dayCellClass(info?.status) +
-                      (isToday ? " ring-1 ring-inset ring-emerald-400" : "")
+                      (isToday ? " ring-1 ring-inset ring-emerald-400" : "") +
+                      (isSelected ? " outline outline-2 outline-offset-1 outline-white" : "")
                     }
                   >
                     {dayNum}
                     {info?.extra && (
                       <span className="absolute bottom-1 right-1 h-1.5 w-1.5 rounded-full bg-indigo-400" />
                     )}
-                  </div>
+                  </button>
                 );
               })}
             </div>
@@ -1020,6 +1189,53 @@ function CalendarioView({
               <span className="h-1.5 w-1.5 rounded-full bg-indigo-400" /> Entrenamiento extra ese día
             </span>
           </div>
+
+          {selectedDate && (
+            <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950 p-4">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-sm font-semibold text-white">{formatLongDate(selectedDate)}</span>
+                <button
+                  onClick={() => setSelectedDate(null)}
+                  className="text-[10px] text-slate-500 hover:text-slate-300"
+                >
+                  Cerrar
+                </button>
+              </div>
+              {selectedSessions.length === 0 ? (
+                <p className="text-xs text-slate-400">
+                  {selectedInfo?.status === "descanso"
+                    ? "Día de descanso, sin sesión programada."
+                    : "No hay ninguna sesión registrada este día."}
+                </p>
+              ) : (
+                <div className="space-y-2.5">
+                  {selectedSessions.map((s, idx) => (
+                    <div key={idx} className="flex items-center justify-between text-xs">
+                      <span className="text-slate-300">
+                        {s.es_extra ? "Entrenamiento extra" : "Sesión de rutina"}
+                        {" · "}
+                        <span className={s.completado ? "text-emerald-400" : "text-rose-400"}>
+                          {s.completado ? "completada" : "sin completar"}
+                        </span>
+                      </span>
+                      <span className="text-slate-400">
+                        {s.esfuerzo_percibido != null && s.duracion_min != null
+                          ? `RPE ${s.esfuerzo_percibido} · ${s.duracion_min} min · carga ${s.esfuerzo_percibido * s.duracion_min}`
+                          : s.duracion_min != null
+                            ? `${s.duracion_min} min`
+                            : "Sin esfuerzo/duración"}
+                      </span>
+                    </div>
+                  ))}
+                  {selectedInfo?.carga != null && selectedSessions.length > 1 && (
+                    <div className="border-t border-slate-800 pt-2 text-right text-xs font-semibold text-emerald-400">
+                      Carga total del día: {selectedInfo.carga}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </section>
       </div>
     </div>
@@ -1076,7 +1292,24 @@ function ProgressTooltip({ active, payload }: any) {
   );
 }
 
-function ProgresoView({ onBack }: { onBack: () => void }) {
+function WeeklyLoadTooltip({ active, payload }: any) {
+  if (!active || !payload || !payload.length) return null;
+  const point: WeeklyLoadPoint = payload[0].payload;
+  return (
+    <div className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-slate-200 shadow-lg">
+      <div className="font-semibold text-white">Semana del {formatShortDate(point.weekStart)}</div>
+      <div className="mt-0.5 text-slate-400">Carga total: {point.carga}</div>
+    </div>
+  );
+}
+
+function ProgresoView({
+  onBack,
+  progress,
+}: {
+  onBack: () => void;
+  progress: ReturnType<typeof useTrainingProgress>;
+}) {
   const { exercises, loading } = useExerciseProgress();
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -1233,6 +1466,48 @@ function ProgresoView({ onBack }: { onBack: () => void }) {
             </section>
           </>
         )}
+
+        <section className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+          <p className="mb-3 text-[10.5px] font-bold uppercase tracking-widest text-emerald-400">
+            Carga de entrenamiento
+          </p>
+          {progress.loading ? (
+            <p className="py-4 text-center text-xs text-slate-500">Cargando…</p>
+          ) : progress.weeklyLoad.length === 0 ? (
+            <p className="py-4 text-center text-xs text-slate-500">
+              Todavía no hay suficientes sesiones con esfuerzo y duración registrados para calcular la carga semanal.
+            </p>
+          ) : (
+            <>
+              <div className="h-48 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={progress.weeklyLoad} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgb(30 41 59)" />
+                    <XAxis
+                      dataKey="weekStart"
+                      tickFormatter={formatShortDate}
+                      tick={{ fill: "rgb(148 163 184)", fontSize: 11 }}
+                      axisLine={{ stroke: "rgb(51 65 85)" }}
+                      tickLine={false}
+                    />
+                    <YAxis
+                      tick={{ fill: "rgb(148 163 184)", fontSize: 11 }}
+                      axisLine={{ stroke: "rgb(51 65 85)" }}
+                      tickLine={false}
+                      width={36}
+                    />
+                    <RTooltip content={<WeeklyLoadTooltip />} />
+                    <Bar dataKey="carga" fill="rgb(99 102 241)" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              <p className="mt-2 text-[11px] text-slate-600">
+                Carga = esfuerzo percibido (0-10) × duración (min), sumada por semana (lunes a domingo). Solo cuenta
+                sesiones completadas con ambos datos registrados.
+              </p>
+            </>
+          )}
+        </section>
       </div>
     </div>
   );
