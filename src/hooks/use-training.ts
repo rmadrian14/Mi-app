@@ -1015,3 +1015,257 @@ export function useMuscleVolume() {
 
   return { loading, volumeByWeek, refresh };
 }
+
+/* ------------------------------ Alerta de descarga (deload) ------------------------------ */
+
+export type DeloadSignalId = "e1rm_drop" | "stagnation" | "mrv_volume" | "load_trend";
+
+export type DeloadSignal = {
+  id: DeloadSignalId;
+  label: string;
+  active: boolean;
+  detail: string;
+};
+
+type DeloadSessionRow = {
+  id: string;
+  fecha: string;
+  routine_day_id: string | null;
+  es_extra: boolean;
+  completado: boolean;
+  esfuerzo_percibido: number | null;
+  duracion_min: number | null;
+};
+type DeloadSetRow = {
+  session_id: string;
+  exercise_id: string;
+  reps_realizadas: number | null;
+  peso_realizado_kg: number | null;
+};
+type DeloadExerciseRow = {
+  id: string;
+  nombre: string;
+  grupo_muscular: string;
+  musculos_secundarios: string[];
+};
+
+const DELOAD_SIGNAL_LABELS: Record<DeloadSignalId, string> = {
+  e1rm_drop: "Caída de rendimiento",
+  stagnation: "Estancamiento por día de rutina",
+  mrv_volume: "Volumen sobre el máximo recuperable",
+  load_trend: "Carga de sesión al alza",
+};
+
+// Evalúa 4 señales de fatiga acumulada sobre datos ya existentes (sin tabla
+// ni campo nuevo): caída de e1RM con esfuerzo igual o mayor, estancamiento
+// del mismo día de rutina 2 semanas seguidas, algún músculo en/sobre su MRV
+// 2 semanas seguidas, y carga de sesión al alza sin mejora de rendimiento en
+// paralelo. Con 2 o más señales activas a la vez se recomienda una semana de
+// descarga.
+export function useDeloadCheck() {
+  const { user } = useAuth();
+  const [sessions, setSessions] = useState<DeloadSessionRow[]>([]);
+  const [sets, setSets] = useState<DeloadSetRow[]>([]);
+  const [exercises, setExercises] = useState<Record<string, DeloadExerciseRow>>({});
+  const [loading, setLoading] = useState(true);
+
+  const refresh = useCallback(async () => {
+    if (!user) {
+      setSessions([]);
+      setSets([]);
+      setExercises({});
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    const [sessionsRes, setsRes, exercisesRes] = await Promise.all([
+      supabase
+        .from("training_sessions")
+        .select("id, fecha, routine_day_id, es_extra, completado, esfuerzo_percibido, duracion_min")
+        .eq("user_id", user.id)
+        .order("fecha"),
+      supabase
+        .from("session_sets")
+        .select("session_id, exercise_id, reps_realizadas, peso_realizado_kg")
+        .eq("user_id", user.id),
+      supabase.from("exercises").select("id, nombre, grupo_muscular, musculos_secundarios").eq("user_id", user.id),
+    ]);
+
+    setSessions((sessionsRes.data ?? []) as DeloadSessionRow[]);
+    setSets((setsRes.data ?? []) as DeloadSetRow[]);
+    const exMap: Record<string, DeloadExerciseRow> = {};
+    for (const e of (exercisesRes.data ?? []) as DeloadExerciseRow[]) exMap[e.id] = e;
+    setExercises(exMap);
+    setLoading(false);
+  }, [user]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  const result = useMemo(() => {
+    const sessionById = new Map(sessions.map((s) => [s.id, s]));
+
+    // Mejor e1RM por ejercicio y por sesión (solo series estimables), y la
+    // misma lista ordenada cronológicamente por ejercicio: sirve tanto para
+    // la señal 1 (caída) como para detectar PRs en la señal 4.
+    const bestPerExercisePerSession = new Map<string, Map<string, number>>();
+    for (const set of sets) {
+      if (set.reps_realizadas == null || set.peso_realizado_kg == null) continue;
+      const { value } = estimate1RM(set.peso_realizado_kg, set.reps_realizadas);
+      if (value == null) continue;
+      if (!sessionById.has(set.session_id)) continue;
+      if (!bestPerExercisePerSession.has(set.exercise_id)) bestPerExercisePerSession.set(set.exercise_id, new Map());
+      const perSession = bestPerExercisePerSession.get(set.exercise_id)!;
+      const prevBest = perSession.get(set.session_id);
+      if (prevBest == null || value > prevBest) perSession.set(set.session_id, value);
+    }
+
+    type SessionE1RM = { sessionId: string; fecha: string; e1rm: number };
+    const byExercise = new Map<string, SessionE1RM[]>();
+    for (const [exerciseId, perSession] of bestPerExercisePerSession) {
+      const list: SessionE1RM[] = [];
+      for (const [sessionId, e1rm] of perSession) {
+        const session = sessionById.get(sessionId);
+        if (!session) continue;
+        list.push({ sessionId, fecha: session.fecha, e1rm });
+      }
+      list.sort((a, b) => a.fecha.localeCompare(b.fecha));
+      byExercise.set(exerciseId, list);
+    }
+
+    // Señal 1: caída de e1RM ≥5% en la última sesión de un ejercicio frente
+    // a la anterior, con esfuerzo percibido igual o mayor en la más reciente.
+    let signal1Active = false;
+    let signal1Detail = "Sin caídas de rendimiento recientes.";
+    for (const [exerciseId, list] of byExercise) {
+      if (list.length < 2) continue;
+      const curr = list[list.length - 1];
+      const prev = list[list.length - 2];
+      const currRpe = sessionById.get(curr.sessionId)?.esfuerzo_percibido ?? null;
+      const prevRpe = sessionById.get(prev.sessionId)?.esfuerzo_percibido ?? null;
+      if (currRpe == null || prevRpe == null || currRpe < prevRpe) continue;
+      const drop = (prev.e1rm - curr.e1rm) / prev.e1rm;
+      if (drop >= 0.05) {
+        signal1Active = true;
+        const nombre = exercises[exerciseId]?.nombre ?? "un ejercicio";
+        signal1Detail = `${nombre}: -${Math.round(drop * 100)}% de e1RM respecto a la sesión anterior, con esfuerzo percibido igual o mayor.`;
+        break;
+      }
+    }
+
+    // Señal 2: e1RM medio de un mismo día de rutina sin mejorar durante 2
+    // semanas consecutivas (necesita al menos 3 apariciones de ese día).
+    const byRoutineDay = new Map<string, { fecha: string; avgE1rm: number }[]>();
+    for (const session of sessions) {
+      if (session.es_extra || !session.routine_day_id) continue;
+      const values: number[] = [];
+      for (const perSession of bestPerExercisePerSession.values()) {
+        const best = perSession.get(session.id);
+        if (best != null) values.push(best);
+      }
+      if (values.length === 0) continue;
+      const avgE1rm = values.reduce((a, b) => a + b, 0) / values.length;
+      if (!byRoutineDay.has(session.routine_day_id)) byRoutineDay.set(session.routine_day_id, []);
+      byRoutineDay.get(session.routine_day_id)!.push({ fecha: session.fecha, avgE1rm });
+    }
+
+    let signal2Active = false;
+    let signal2Detail = "Rendimiento estable o en mejora en todos los días de rutina.";
+    for (const occurrences of byRoutineDay.values()) {
+      occurrences.sort((a, b) => a.fecha.localeCompare(b.fecha));
+      if (occurrences.length < 3) continue;
+      const last3 = occurrences.slice(-3);
+      const delta1 = last3[1].avgE1rm - last3[0].avgE1rm;
+      const delta2 = last3[2].avgE1rm - last3[1].avgE1rm;
+      if (delta1 <= 0 && delta2 <= 0) {
+        signal2Active = true;
+        signal2Detail = `Rendimiento medio estancado o en descenso 2 semanas seguidas en el mismo día de rutina (última sesión: ${last3[2].fecha}).`;
+        break;
+      }
+    }
+
+    // Señal 3: algún músculo en o por encima de su MRV en las 2 semanas más
+    // recientes (misma cuenta fraccional que la Entrega F).
+    const weeklyVolume = new Map<string, Record<string, number>>();
+    for (const set of sets) {
+      const session = sessionById.get(set.session_id);
+      const exercise = exercises[set.exercise_id];
+      if (!session || !exercise) continue;
+      const weekKey = toLocalISODate(mondayOf(new Date(`${session.fecha}T00:00:00`)));
+      const bucket = weeklyVolume.get(weekKey) ?? {};
+      const principal = normalizeMuscleGroup(exercise.grupo_muscular);
+      if (principal) bucket[principal] = (bucket[principal] ?? 0) + 1;
+      for (const sec of exercise.musculos_secundarios ?? []) {
+        const secNorm = normalizeMuscleGroup(sec);
+        if (secNorm && secNorm !== principal) bucket[secNorm] = (bucket[secNorm] ?? 0) + 0.5;
+      }
+      weeklyVolume.set(weekKey, bucket);
+    }
+    const weekKeysSorted = Array.from(weeklyVolume.keys()).sort();
+
+    let signal3Active = false;
+    let signal3Detail = "Ningún músculo por encima de su volumen máximo recuperable.";
+    if (weekKeysSorted.length >= 2) {
+      const lastTwoWeeks = weekKeysSorted.slice(-2);
+      for (const muscle of Object.keys(MUSCLE_LANDMARKS)) {
+        const mrv = MUSCLE_LANDMARKS[muscle].mrv;
+        const values = lastTwoWeeks.map((wk) => weeklyVolume.get(wk)?.[muscle] ?? 0);
+        if (values.every((v) => v >= mrv)) {
+          signal3Active = true;
+          signal3Detail = `${muscle}: ${values.map((v) => v.toFixed(1)).join(" y ")} series en las últimas 2 semanas, por encima de su MRV (${mrv}).`;
+          break;
+        }
+      }
+    }
+
+    // Señal 4: carga de sesión (esfuerzo × duración) sin bajar en ningún
+    // tramo de las últimas sesiones, con subida neta, y sin ningún récord de
+    // e1RM nuevo en ese mismo rango de fechas.
+    const loadSessions = sessions
+      .filter((s) => s.completado && s.esfuerzo_percibido != null && s.duracion_min != null)
+      .sort((a, b) => a.fecha.localeCompare(b.fecha))
+      .slice(-4)
+      .map((s) => ({ fecha: s.fecha, carga: (s.esfuerzo_percibido as number) * (s.duracion_min as number) }));
+
+    let signal4Active = false;
+    let signal4Detail = "Sin tendencia sostenida de carga de sesión al alza.";
+    if (loadSessions.length >= 3) {
+      const nonDecreasing = loadSessions.every((s, i) => i === 0 || s.carga >= loadSessions[i - 1].carga);
+      const netIncrease = loadSessions[loadSessions.length - 1].carga > loadSessions[0].carga;
+      if (nonDecreasing && netIncrease) {
+        const rangeStart = loadSessions[0].fecha;
+        const rangeEnd = loadSessions[loadSessions.length - 1].fecha;
+        let anyPR = false;
+        for (const list of byExercise.values()) {
+          let runningMax = -Infinity;
+          for (const point of list) {
+            const isNewPR = point.e1rm > runningMax;
+            if (isNewPR) runningMax = point.e1rm;
+            if (isNewPR && point.fecha >= rangeStart && point.fecha <= rangeEnd) {
+              anyPR = true;
+              break;
+            }
+          }
+          if (anyPR) break;
+        }
+        if (!anyPR) {
+          signal4Active = true;
+          signal4Detail = `Carga de sesión en aumento sostenido entre ${rangeStart} y ${rangeEnd}, sin ningún récord de fuerza nuevo en ese periodo.`;
+        }
+      }
+    }
+
+    const signals: DeloadSignal[] = [
+      { id: "e1rm_drop", label: DELOAD_SIGNAL_LABELS.e1rm_drop, active: signal1Active, detail: signal1Detail },
+      { id: "stagnation", label: DELOAD_SIGNAL_LABELS.stagnation, active: signal2Active, detail: signal2Detail },
+      { id: "mrv_volume", label: DELOAD_SIGNAL_LABELS.mrv_volume, active: signal3Active, detail: signal3Detail },
+      { id: "load_trend", label: DELOAD_SIGNAL_LABELS.load_trend, active: signal4Active, detail: signal4Detail },
+    ];
+    const activeCount = signals.filter((s) => s.active).length;
+
+    return { shouldDeload: activeCount >= 2, activeCount, signals };
+  }, [sessions, sets, exercises]);
+
+  return { loading, ...result, refresh };
+}

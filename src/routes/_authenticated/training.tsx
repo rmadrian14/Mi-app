@@ -38,6 +38,7 @@ import {
   useTrainingProgress,
   useExerciseProgress,
   useMuscleVolume,
+  useDeloadCheck,
   createExtraSession,
   todayISODate,
   toLocalISODate,
@@ -56,6 +57,7 @@ import {
   type SessionSummaryRow,
   type WeeklyLoadPoint,
   type ProgressPoint,
+  type DeloadSignal,
 } from "@/hooks/use-training";
 
 export const Route = createFileRoute("/_authenticated/training")({
@@ -74,6 +76,7 @@ function TrainingPage() {
   const { profile, loading, createProfileAndSeedRoutine } = usePersonalProfile();
   const [view, setView] = useState<"hoy" | "rutina" | "calendario" | "progreso">("hoy");
   const progress = useTrainingProgress();
+  const deload = useDeloadCheck();
 
   if (loading) {
     return (
@@ -94,7 +97,7 @@ function TrainingPage() {
     return <CalendarioView onBack={() => setView("hoy")} progress={progress} />;
   }
   if (view === "progreso") {
-    return <ProgresoView onBack={() => setView("hoy")} progress={progress} />;
+    return <ProgresoView onBack={() => setView("hoy")} progress={progress} deload={deload} />;
   }
   return (
     <HoyView
@@ -102,6 +105,7 @@ function TrainingPage() {
       onOpenCalendario={() => setView("calendario")}
       onOpenProgreso={() => setView("progreso")}
       progress={progress}
+      deload={deload}
     />
   );
 }
@@ -356,16 +360,59 @@ function buildInitialSets(
   return initial;
 }
 
+function DeloadBanner({
+  signals,
+  onOpenProgreso,
+}: {
+  signals: DeloadSignal[];
+  onOpenProgreso: () => void;
+}) {
+  const active = signals.filter((s) => s.active);
+  return (
+    <div className="mb-6 rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4">
+      <div className="flex items-start gap-2.5">
+        <span className="mt-0.5 text-lg leading-none">⚠️</span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-bold text-amber-300">Posible necesidad de descarga</p>
+          <p className="mt-1 text-xs text-amber-200/80">
+            Se han detectado {active.length} de {signals.length} señales de fatiga acumulada:
+          </p>
+          <ul className="mt-2 space-y-1">
+            {active.map((s) => (
+              <li key={s.id} className="text-xs text-amber-100/90">
+                • {s.detail}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-3 text-xs font-semibold text-white">
+            Recomendación: esta semana, reduce el número de series aproximadamente a la mitad y no superes el 70%
+            de tu peso habitual.
+          </p>
+          <button
+            type="button"
+            onClick={onOpenProgreso}
+            className="mt-2 text-[11px] font-semibold text-amber-300 underline decoration-dotted hover:text-amber-200"
+          >
+            Ver detalle en Progreso
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function HoyView({
   onOpenRutina,
   onOpenCalendario,
   onOpenProgreso,
   progress,
+  deload,
 }: {
   onOpenRutina: () => void;
   onOpenCalendario: () => void;
   onOpenProgreso: () => void;
   progress: ReturnType<typeof useTrainingProgress>;
+  deload: ReturnType<typeof useDeloadCheck>;
 }) {
   const { user } = useAuth();
   const routine = useRoutine();
@@ -492,6 +539,10 @@ function HoyView({
             )}
           </div>
         </header>
+
+        {!deload.loading && deload.shouldDeload && (
+          <DeloadBanner signals={deload.signals} onOpenProgreso={onOpenProgreso} />
+        )}
 
         {loading ? (
           <p className="text-sm text-slate-400">Cargando…</p>
@@ -1465,12 +1516,69 @@ function MuscleVolumeSection() {
   );
 }
 
+function DeloadChecklist({ deload }: { deload: ReturnType<typeof useDeloadCheck> }) {
+  return (
+    <section className="mb-6 rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+      <div className="mb-3 flex items-center justify-between">
+        <p className="text-[10.5px] font-bold uppercase tracking-widest text-emerald-400">
+          Señales de descarga
+        </p>
+        {!deload.loading && (
+          <span
+            className={
+              "text-[11px] font-semibold " + (deload.shouldDeload ? "text-amber-400" : "text-slate-500")
+            }
+          >
+            {deload.activeCount} de {deload.signals.length} activas
+          </span>
+        )}
+      </div>
+
+      {deload.loading ? (
+        <p className="py-2 text-xs text-slate-500">Cargando…</p>
+      ) : (
+        <div className="space-y-2">
+          {deload.signals.map((s) => (
+            <div key={s.id} className="flex items-start gap-2 text-xs">
+              <span
+                className={
+                  "mt-0.5 h-2 w-2 shrink-0 rounded-full " + (s.active ? "bg-amber-400" : "bg-slate-700")
+                }
+              />
+              <div className="min-w-0">
+                <span className={s.active ? "font-semibold text-amber-300" : "font-semibold text-slate-400"}>
+                  {s.label}
+                </span>
+                <span className="text-slate-500"> — {s.detail}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!deload.loading && deload.shouldDeload && (
+        <p className="mt-3 text-xs font-semibold text-white">
+          Recomendación: esta semana, reduce el número de series aproximadamente a la mitad y no superes el 70% de
+          tu peso habitual.
+        </p>
+      )}
+
+      <p className="mt-3 text-[11px] text-slate-600">
+        Hace falta un mínimo de historial (2-3 sesiones o semanas, según la señal) para poder evaluar cada una; si
+        no hay datos suficientes, se muestra como no activa.
+      </p>
+    </section>
+  );
+}
+
 function ProgresoView({
   onBack,
   progress,
+  deload,
 }: {
   onBack: () => void;
   progress: ReturnType<typeof useTrainingProgress>;
+  deload: ReturnType<typeof useDeloadCheck>;
 }) {
   const { exercises, loading } = useExerciseProgress();
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -1519,6 +1627,8 @@ function ProgresoView({
             Evolución de tu fuerza estimada (e1RM) por ejercicio.
           </p>
         </header>
+
+        <DeloadChecklist deload={deload} />
 
         {loading ? (
           <p className="text-sm text-slate-400">Cargando…</p>
