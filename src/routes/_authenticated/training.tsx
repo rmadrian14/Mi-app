@@ -29,6 +29,7 @@ import {
   CalendarDays,
   LineChart as LineChartIcon,
   Star,
+  TrendingUp,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -39,6 +40,7 @@ import {
   useExerciseProgress,
   useMuscleVolume,
   useDeloadCheck,
+  useProgressionSuggestions,
   createExtraSession,
   todayISODate,
   toLocalISODate,
@@ -58,6 +60,7 @@ import {
   type WeeklyLoadPoint,
   type ProgressPoint,
   type DeloadSignal,
+  type ProgressionSuggestion,
 } from "@/hooks/use-training";
 
 export const Route = createFileRoute("/_authenticated/training")({
@@ -418,6 +421,7 @@ function HoyView({
   const routine = useRoutine();
   const today = routine.days.find((d) => d.dia_semana === todayDiaSemana()) ?? null;
   const entry = useTodayEntry(today?.id ?? null);
+  const progression = useProgressionSuggestions();
   const [draftSets, setDraftSets] = useState<Record<string, SessionSetDraft[]>>({});
   const [completing, setCompleting] = useState(false);
   const [showExtra, setShowExtra] = useState(false);
@@ -555,6 +559,9 @@ function HoyView({
                     key={ex.id}
                     exercise={ex}
                     sets={draftSets[ex.exercise_id] ?? []}
+                    suggestion={
+                      progression.loading ? null : progression.suggest(ex.exercise_id, ex.reps_objetivo)
+                    }
                     onChange={(sets) => setDraftSets((prev) => ({ ...prev, [ex.exercise_id]: sets }))}
                     onSaveRow={(row) => handleSaveRow(ex.exercise_id, row)}
                     onRemoveRow={(row) => handleRemoveRow(ex.exercise_id, row)}
@@ -662,15 +669,63 @@ function setDotClass(s: SessionSetDraft, targetReps: number | null, targetPeso: 
   return { dot: "bg-amber-500", title: "Por debajo del objetivo" };
 }
 
+function ProgressionSuggestionBadge({ suggestion }: { suggestion: ProgressionSuggestion | null }) {
+  if (!suggestion) return null;
+
+  const sube = suggestion.kind === "sube_fallo_reps" || suggestion.kind === "sube_fallo_e1rm" || suggestion.kind === "sube_rango";
+
+  let title: string;
+  let body: string;
+  switch (suggestion.kind) {
+    case "sube_fallo_e1rm":
+      title = `Prueba con ${suggestion.suggestedWeightKg} kg (antes ${suggestion.currentWeightKg} kg)`;
+      body = `e1RM +${Math.round(suggestion.changePct * 100)}% desde el ${formatShortDate(suggestion.previousFecha)}, con el mismo esfuerzo percibido o mayor.`;
+      break;
+    case "sube_fallo_reps":
+      title = `Prueba con ${suggestion.suggestedWeightKg} kg (antes ${suggestion.currentWeightKg} kg)`;
+      body = `La última vez llegaste a ${suggestion.lastReps} reps al fallo — el peso se ha quedado ligero para trabajar cerca del fallo real.`;
+      break;
+    case "sube_rango":
+      title = `Prueba con ${suggestion.suggestedWeightKg} kg y vuelve a ${suggestion.repMax} reps`;
+      body = `Llegaste a ${suggestion.repMax} reps en todas las series con ${suggestion.currentWeightKg} kg.`;
+      break;
+    case "mantener_fallo":
+      title = `Mantén ${suggestion.currentWeightKg} kg`;
+      body = `El rendimiento no ha subido todavía lo suficiente desde la última vez (${formatShortDate(suggestion.previousFecha)}).`;
+      break;
+    case "mantener_rango":
+      title = `Mantén ${suggestion.currentWeightKg} kg, intenta llegar a ${suggestion.repMax} reps en todas las series`;
+      body = `Última vez: ${suggestion.lastReps.join(", ")}.`;
+      break;
+  }
+
+  return (
+    <div
+      className={
+        "mb-3 flex items-start gap-1.5 rounded-lg border px-2.5 py-2 text-[11.5px] " +
+        (sube ? "border-indigo-500/30 bg-indigo-500/10" : "border-slate-800 bg-slate-950/60")
+      }
+    >
+      {sube && <TrendingUp className="mt-0.5 h-3.5 w-3.5 shrink-0 text-indigo-400" />}
+      <div className="min-w-0">
+        <p className={"font-semibold " + (sube ? "text-indigo-300" : "text-slate-400")}>Sugerencia: {title}</p>
+        <p className={sube ? "text-indigo-200/70" : "text-slate-500"}>{body}</p>
+      </div>
+    </div>
+  );
+}
+
 function ExerciseSetsCard({
   exercise,
   sets,
+  suggestion,
   onChange,
   onSaveRow,
   onRemoveRow,
 }: {
   exercise: RoutineExerciseItem;
   sets: SessionSetDraft[];
+  suggestion: ProgressionSuggestion | null;
   onChange: (sets: SessionSetDraft[]) => void;
   onSaveRow: (row: SessionSetDraft) => void;
   onRemoveRow: (row: SessionSetDraft) => void;
@@ -698,6 +753,8 @@ function ExerciseSetsCard({
         Objetivo: {exercise.series_objetivo} series · {exercise.reps_objetivo}
         {exercise.peso_objetivo_kg != null && ` · ${exercise.peso_objetivo_kg} kg`}
       </div>
+
+      <ProgressionSuggestionBadge suggestion={suggestion} />
       <div className="space-y-1.5">
         {sets.map((s, i) => {
           const status = setDotClass(s, targetReps, targetPeso);

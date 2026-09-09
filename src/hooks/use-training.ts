@@ -1269,3 +1269,204 @@ export function useDeloadCheck() {
 
   return { loading, ...result, refresh };
 }
+
+/* ------------------------------ Sugerencia de progresión de carga ------------------------------ */
+
+// Redondea al múltiplo de `step` más cercano (las mancuernas del usuario
+// ajustan en incrementos de 2 kg).
+function roundToStep(value: number, step: number): number {
+  return Math.round(value / step) * step;
+}
+
+// "12-15" -> {min:12,max:15}. "10 por pierna" -> {min:10,max:10} (un solo
+// número = objetivo fijo). Se descarta todo lo que va entre paréntesis antes
+// de buscar números, para no confundir aclaraciones como "(rango parcial
+// 30-40°, muy ligero)" con el rango de reps objetivo.
+function parseRepRangeObjetivo(text: string): { min: number; max: number } | null {
+  const core = text.split("(")[0];
+  const found = core.match(/\d+(\.\d+)?/g);
+  if (!found || found.length === 0) return null;
+  const nums = found.map(Number);
+  return nums.length === 1 ? { min: nums[0], max: nums[0] } : { min: nums[0], max: nums[1] };
+}
+
+export type ProgressionSuggestion =
+  | { kind: "sube_fallo_reps"; currentWeightKg: number; suggestedWeightKg: number; lastReps: number }
+  | {
+      kind: "sube_fallo_e1rm";
+      currentWeightKg: number;
+      suggestedWeightKg: number;
+      changePct: number;
+      previousFecha: string;
+    }
+  | { kind: "mantener_fallo"; currentWeightKg: number; previousFecha: string }
+  | { kind: "sube_rango"; currentWeightKg: number; suggestedWeightKg: number; repMax: number }
+  | { kind: "mantener_rango"; currentWeightKg: number; lastReps: number[]; repMax: number };
+
+type ProgSessionRow = { id: string; fecha: string; esfuerzo_percibido: number | null };
+type ProgSetRow = {
+  session_id: string;
+  exercise_id: string;
+  reps_realizadas: number | null;
+  peso_realizado_kg: number | null;
+};
+type ProgOccurrence = {
+  sessionId: string;
+  fecha: string;
+  esfuerzoPercibido: number | null;
+  sets: { reps: number; peso: number | null }[];
+};
+
+// Sugerencia de peso para la próxima vez que se haga un ejercicio, a partir
+// de las dos últimas sesiones en las que se registró. Dos ramas según cómo
+// esté redactado el objetivo de reps de ese ejercicio en su día de rutina:
+//  - "al fallo" / "casi al fallo" (sin rango de reps, RIR 0 por diseño): no
+//    hay una tendencia de RIR que observar (es constante), así que se
+//    autorregula sobre el e1RM de la mejor serie estimable, con el mismo
+//    criterio que RTS/Tuchscherer (calcular el e1RM del día y decidir la
+//    carga siguiente a partir de él en vez de un porcentaje fijo). Si la
+//    última sesión llegó a 15+ reps en alguna serie, el peso se ha quedado
+//    ligero para trabajar cerca del fallo real (deja de ser estimable de
+//    forma fiable por encima de 15, ver estimate1RM) y se sugiere subir
+//    peso directamente, sin esperar al cálculo de e1RM.
+//  - rango de reps fijo (p.ej. pierna, con objetivo de reps numérico):
+//    progresión doble clásica — sube peso solo si TODAS las series de la
+//    última sesión llegaron al tope del rango.
+// Todo peso sugerido se redondea al múltiplo de 2 kg más cercano.
+export function useProgressionSuggestions() {
+  const { user } = useAuth();
+  const [sessions, setSessions] = useState<ProgSessionRow[]>([]);
+  const [sets, setSets] = useState<ProgSetRow[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const refresh = useCallback(async () => {
+    if (!user) {
+      setSessions([]);
+      setSets([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    const [sessionsRes, setsRes] = await Promise.all([
+      supabase
+        .from("training_sessions")
+        .select("id, fecha, esfuerzo_percibido")
+        .eq("user_id", user.id)
+        .order("fecha"),
+      supabase
+        .from("session_sets")
+        .select("session_id, exercise_id, reps_realizadas, peso_realizado_kg")
+        .eq("user_id", user.id),
+    ]);
+    setSessions((sessionsRes.data ?? []) as ProgSessionRow[]);
+    setSets((setsRes.data ?? []) as ProgSetRow[]);
+    setLoading(false);
+  }, [user]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  const historyByExercise = useMemo(() => {
+    const sessionById = new Map(sessions.map((s) => [s.id, s]));
+    const bySessionExercise = new Map<string, { reps: number; peso: number | null }[]>();
+    for (const s of sets) {
+      if (s.reps_realizadas == null || !sessionById.has(s.session_id)) continue;
+      const key = `${s.exercise_id}|${s.session_id}`;
+      if (!bySessionExercise.has(key)) bySessionExercise.set(key, []);
+      bySessionExercise.get(key)!.push({ reps: s.reps_realizadas, peso: s.peso_realizado_kg });
+    }
+
+    const map = new Map<string, ProgOccurrence[]>();
+    for (const [key, list] of bySessionExercise) {
+      const [exerciseId, sessionId] = key.split("|");
+      const session = sessionById.get(sessionId)!;
+      if (!map.has(exerciseId)) map.set(exerciseId, []);
+      map
+        .get(exerciseId)!
+        .push({ sessionId, fecha: session.fecha, esfuerzoPercibido: session.esfuerzo_percibido, sets: list });
+    }
+    for (const list of map.values()) list.sort((a, b) => a.fecha.localeCompare(b.fecha));
+    return map;
+  }, [sessions, sets]);
+
+  const suggest = useCallback(
+    (exerciseId: string, repsObjetivo: string): ProgressionSuggestion | null => {
+      const history = historyByExercise.get(exerciseId);
+      if (!history || history.length < 2) return null;
+      const curr = history[history.length - 1];
+      const prev = history[history.length - 2];
+
+      if (/fallo/i.test(repsObjetivo)) {
+        const bestOf = (occ: ProgOccurrence) => {
+          let best: { e1rm: number; peso: number } | null = null;
+          for (const s of occ.sets) {
+            if (s.peso == null) continue;
+            const { value } = estimate1RM(s.peso, s.reps);
+            if (value != null && (best == null || value > best.e1rm)) best = { e1rm: value, peso: s.peso };
+          }
+          return best;
+        };
+        const currBest = bestOf(curr);
+        const prevBest = bestOf(prev);
+        const currentWeightKg = currBest?.peso ?? curr.sets.find((s) => s.peso != null)?.peso ?? null;
+        if (currentWeightKg == null) return null;
+
+        const maxReps = Math.max(...curr.sets.map((s) => s.reps));
+        if (maxReps >= 15) {
+          return {
+            kind: "sube_fallo_reps",
+            currentWeightKg,
+            suggestedWeightKg: Math.max(roundToStep(currentWeightKg * 1.05, 2), currentWeightKg + 2),
+            lastReps: maxReps,
+          };
+        }
+
+        if (currBest && prevBest) {
+          const currRpe = curr.esfuerzoPercibido;
+          const prevRpe = prev.esfuerzoPercibido;
+          const rpeOk = currRpe != null && prevRpe != null && currRpe >= prevRpe;
+          const changePct = (currBest.e1rm - prevBest.e1rm) / prevBest.e1rm;
+          if (rpeOk && changePct >= 0.025) {
+            return {
+              kind: "sube_fallo_e1rm",
+              currentWeightKg,
+              suggestedWeightKg: Math.max(
+                roundToStep(currentWeightKg * (1 + changePct), 2),
+                currentWeightKg + 2,
+              ),
+              changePct,
+              previousFecha: prev.fecha,
+            };
+          }
+        }
+
+        return { kind: "mantener_fallo", currentWeightKg, previousFecha: prev.fecha };
+      }
+
+      const range = parseRepRangeObjetivo(repsObjetivo);
+      if (!range) return null;
+      const currentWeightKg = curr.sets.find((s) => s.peso != null)?.peso ?? null;
+      if (currentWeightKg == null) return null;
+
+      const allAtTop = curr.sets.every((s) => s.reps >= range.max);
+      if (allAtTop) {
+        return {
+          kind: "sube_rango",
+          currentWeightKg,
+          suggestedWeightKg: Math.max(roundToStep(currentWeightKg * 1.05, 2), currentWeightKg + 2),
+          repMax: range.max,
+        };
+      }
+      return {
+        kind: "mantener_rango",
+        currentWeightKg,
+        lastReps: curr.sets.map((s) => s.reps),
+        repMax: range.max,
+      };
+    },
+    [historyByExercise],
+  );
+
+  return { loading, suggest, refresh };
+}
