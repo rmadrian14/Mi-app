@@ -524,6 +524,7 @@ export function useTodayEntry(routineDayId: string | null) {
     saveSet,
     removeSet,
     markCompleted,
+    ensureSession,
     refresh,
   };
 }
@@ -1469,4 +1470,219 @@ export function useProgressionSuggestions() {
   );
 
   return { loading, suggest, refresh };
+}
+
+/* ------------------------------ Molestias por ejercicio (Sistema de Semáforo) ------------------------------ */
+
+export const DISCOMFORT_ZONAS = [
+  "rodilla",
+  "hombro",
+  "codo",
+  "muñeca",
+  "espalda baja",
+  "cadera",
+  "cuello",
+  "otro",
+] as const;
+
+export type DiscomfortSemaforo = "verde" | "amarillo" | "rojo";
+
+// Sistema de Semáforo de dolor: 0-3 verde, 4-6 amarillo, 7-10 rojo.
+export function discomfortSemaforo(intensidad: number): DiscomfortSemaforo {
+  if (intensidad >= 7) return "rojo";
+  if (intensidad >= 4) return "amarillo";
+  return "verde";
+}
+
+export type DiscomfortEntry = {
+  id: string;
+  zona_cuerpo: string;
+  intensidad: number;
+  nota: string | null;
+};
+
+export type DiscomfortWatch = {
+  exerciseId: string;
+  nombre: string;
+  zona: string;
+  count: number;
+  lastFecha: string;
+  lastIntensidad: number;
+};
+
+type DiscRow = {
+  id: string;
+  session_id: string;
+  exercise_id: string;
+  zona_cuerpo: string;
+  intensidad: number;
+  nota: string | null;
+};
+type DiscSessionRow = { id: string; fecha: string };
+type DiscSetRow = { session_id: string; exercise_id: string };
+
+// Molestias registradas por ejercicio-sesión (Entrega I). Expone las
+// entradas ya guardadas (para precargar el widget de "Hoy"), guardar/quitar
+// una molestia, y la lista de "a vigilar": mismo ejercicio + zona en
+// amarillo o rojo (intensidad ≥4) en 2 o más de las últimas 3 sesiones en
+// las que se hizo ese ejercicio (no solo las que tienen molestia registrada).
+export function useExerciseDiscomfort() {
+  const { user } = useAuth();
+  const [rows, setRows] = useState<DiscRow[]>([]);
+  const [sessions, setSessions] = useState<DiscSessionRow[]>([]);
+  const [sets, setSets] = useState<DiscSetRow[]>([]);
+  const [exerciseNames, setExerciseNames] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+
+  const refresh = useCallback(async () => {
+    if (!user) {
+      setRows([]);
+      setSessions([]);
+      setSets([]);
+      setExerciseNames({});
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    const [discRes, sessionsRes, setsRes, exercisesRes] = await Promise.all([
+      supabase
+        .from("exercise_discomfort")
+        .select("id, session_id, exercise_id, zona_cuerpo, intensidad, nota")
+        .eq("user_id", user.id),
+      supabase.from("training_sessions").select("id, fecha").eq("user_id", user.id).order("fecha"),
+      supabase.from("session_sets").select("session_id, exercise_id").eq("user_id", user.id),
+      supabase.from("exercises").select("id, nombre").eq("user_id", user.id),
+    ]);
+    setRows((discRes.data ?? []) as DiscRow[]);
+    setSessions((sessionsRes.data ?? []) as DiscSessionRow[]);
+    setSets((setsRes.data ?? []) as DiscSetRow[]);
+    const names: Record<string, string> = {};
+    for (const e of (exercisesRes.data ?? []) as { id: string; nombre: string }[]) names[e.id] = e.nombre;
+    setExerciseNames(names);
+    setLoading(false);
+  }, [user]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  const entryByKey = useMemo(() => {
+    const map = new Map<string, DiscomfortEntry>();
+    for (const r of rows) {
+      map.set(`${r.session_id}|${r.exercise_id}`, {
+        id: r.id,
+        zona_cuerpo: r.zona_cuerpo,
+        intensidad: r.intensidad,
+        nota: r.nota,
+      });
+    }
+    return map;
+  }, [rows]);
+
+  const getEntry = useCallback(
+    (sessionId: string, exerciseId: string): DiscomfortEntry | null =>
+      entryByKey.get(`${sessionId}|${exerciseId}`) ?? null,
+    [entryByKey],
+  );
+
+  // Guarda (inserta o actualiza) la molestia de un ejercicio en una sesión.
+  // El id de una fila ya existente se resuelve siempre desde entryByKey (el
+  // estado actual), nunca desde un id guardado aparte en el componente: es
+  // la misma clase de fallo que causó series duplicadas en session_sets si
+  // el id no se vuelve a mirar en cada guardado.
+  const save = useCallback(
+    async (
+      sessionId: string,
+      exerciseId: string,
+      patch: { zona_cuerpo: string; intensidad: number; nota: string | null },
+    ) => {
+      if (!user) throw new Error("No hay sesión activa.");
+      const existing = entryByKey.get(`${sessionId}|${exerciseId}`);
+      if (existing) {
+        const { error } = await supabase.from("exercise_discomfort").update(patch).eq("id", existing.id);
+        if (error) throw error;
+        setRows((prev) => prev.map((r) => (r.id === existing.id ? { ...r, ...patch } : r)));
+        return;
+      }
+      const { data, error } = await supabase
+        .from("exercise_discomfort")
+        .insert({ user_id: user.id, session_id: sessionId, exercise_id: exerciseId, ...patch })
+        .select("id")
+        .single();
+      if (error) throw error;
+      setRows((prev) => [...prev, { id: data.id, session_id: sessionId, exercise_id: exerciseId, ...patch }]);
+    },
+    [user, entryByKey],
+  );
+
+  const remove = useCallback(
+    async (sessionId: string, exerciseId: string) => {
+      const existing = entryByKey.get(`${sessionId}|${exerciseId}`);
+      if (!existing) return;
+      const { error } = await supabase.from("exercise_discomfort").delete().eq("id", existing.id);
+      if (error) throw error;
+      setRows((prev) => prev.filter((r) => r.id !== existing.id));
+    },
+    [entryByKey],
+  );
+
+  const watchList = useMemo<DiscomfortWatch[]>(() => {
+    const sessionById = new Map(sessions.map((s) => [s.id, s]));
+
+    const sessionsByExercise = new Map<string, { sessionId: string; fecha: string }[]>();
+    const seenPairs = new Set<string>();
+    for (const s of sets) {
+      const pairKey = `${s.exercise_id}|${s.session_id}`;
+      if (seenPairs.has(pairKey)) continue;
+      seenPairs.add(pairKey);
+      const session = sessionById.get(s.session_id);
+      if (!session) continue;
+      if (!sessionsByExercise.has(s.exercise_id)) sessionsByExercise.set(s.exercise_id, []);
+      sessionsByExercise.get(s.exercise_id)!.push({ sessionId: s.session_id, fecha: session.fecha });
+    }
+    for (const list of sessionsByExercise.values()) list.sort((a, b) => a.fecha.localeCompare(b.fecha));
+
+    const discBySessionExercise = new Map<string, DiscRow[]>();
+    for (const r of rows) {
+      const key = `${r.exercise_id}|${r.session_id}`;
+      if (!discBySessionExercise.has(key)) discBySessionExercise.set(key, []);
+      discBySessionExercise.get(key)!.push(r);
+    }
+
+    const result: DiscomfortWatch[] = [];
+    for (const [exerciseId, occurrences] of sessionsByExercise) {
+      const last3 = occurrences.slice(-3);
+      const countByZone = new Map<string, { count: number; lastFecha: string; lastIntensidad: number }>();
+      for (const occ of last3) {
+        const entries = discBySessionExercise.get(`${exerciseId}|${occ.sessionId}`) ?? [];
+        const zonesThisSession = new Set(entries.filter((e) => e.intensidad >= 4).map((e) => e.zona_cuerpo));
+        for (const zona of zonesThisSession) {
+          const entry = entries.find((e) => e.zona_cuerpo === zona)!;
+          const prevStat = countByZone.get(zona);
+          // last3 está en orden cronológico ascendente: la última vez que se
+          // vea esta zona en el bucle es siempre la más reciente.
+          countByZone.set(zona, {
+            count: (prevStat?.count ?? 0) + 1,
+            lastFecha: occ.fecha,
+            lastIntensidad: entry.intensidad,
+          });
+        }
+      }
+      for (const [zona, stat] of countByZone) {
+        if (stat.count >= 2) {
+          result.push({
+            exerciseId,
+            nombre: exerciseNames[exerciseId] ?? "Ejercicio",
+            zona,
+            count: stat.count,
+            lastFecha: stat.lastFecha,
+            lastIntensidad: stat.lastIntensidad,
+          });
+        }
+      }
+    }
+    return result;
+  }, [sessions, sets, rows, exerciseNames]);
+
+  return { loading, getEntry, save, remove, watchList, refresh };
 }

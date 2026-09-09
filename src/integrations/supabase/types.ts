@@ -195,6 +195,54 @@ export type Database = {
         }
         Relationships: []
       }
+      exercise_discomfort: {
+        Row: {
+          created_at: string
+          exercise_id: string
+          id: string
+          intensidad: number
+          nota: string | null
+          session_id: string
+          user_id: string
+          zona_cuerpo: string
+        }
+        Insert: {
+          created_at?: string
+          exercise_id: string
+          id?: string
+          intensidad: number
+          nota?: string | null
+          session_id: string
+          user_id: string
+          zona_cuerpo: string
+        }
+        Update: {
+          created_at?: string
+          exercise_id?: string
+          id?: string
+          intensidad?: number
+          nota?: string | null
+          session_id?: string
+          user_id?: string
+          zona_cuerpo?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "exercise_discomfort_exercise_id_fkey"
+            columns: ["exercise_id"]
+            isOneToOne: false
+            referencedRelation: "exercises"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "exercise_discomfort_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "training_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       exercises: {
         Row: {
           created_at: string

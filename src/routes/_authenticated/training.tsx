@@ -30,6 +30,8 @@ import {
   LineChart as LineChartIcon,
   Star,
   TrendingUp,
+  ClipboardList,
+  AlertTriangle,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -41,6 +43,7 @@ import {
   useMuscleVolume,
   useDeloadCheck,
   useProgressionSuggestions,
+  useExerciseDiscomfort,
   createExtraSession,
   todayISODate,
   toLocalISODate,
@@ -61,6 +64,10 @@ import {
   type ProgressPoint,
   type DeloadSignal,
   type ProgressionSuggestion,
+  type DiscomfortEntry,
+  type DiscomfortWatch,
+  DISCOMFORT_ZONAS,
+  discomfortSemaforo,
 } from "@/hooks/use-training";
 
 export const Route = createFileRoute("/_authenticated/training")({
@@ -77,9 +84,10 @@ function todayDiaSemana() {
 
 function TrainingPage() {
   const { profile, loading, createProfileAndSeedRoutine } = usePersonalProfile();
-  const [view, setView] = useState<"hoy" | "rutina" | "calendario" | "progreso">("hoy");
+  const [view, setView] = useState<"hoy" | "rutina" | "calendario" | "progreso" | "resumen">("hoy");
   const progress = useTrainingProgress();
   const deload = useDeloadCheck();
+  const discomfort = useExerciseDiscomfort();
 
   if (loading) {
     return (
@@ -102,13 +110,25 @@ function TrainingPage() {
   if (view === "progreso") {
     return <ProgresoView onBack={() => setView("hoy")} progress={progress} deload={deload} />;
   }
+  if (view === "resumen") {
+    return (
+      <ResumenSemanalView
+        onBack={() => setView("hoy")}
+        progress={progress}
+        deload={deload}
+        discomfort={discomfort}
+      />
+    );
+  }
   return (
     <HoyView
       onOpenRutina={() => setView("rutina")}
       onOpenCalendario={() => setView("calendario")}
       onOpenProgreso={() => setView("progreso")}
+      onOpenResumen={() => setView("resumen")}
       progress={progress}
       deload={deload}
+      discomfort={discomfort}
     />
   );
 }
@@ -408,14 +428,18 @@ function HoyView({
   onOpenRutina,
   onOpenCalendario,
   onOpenProgreso,
+  onOpenResumen,
   progress,
   deload,
+  discomfort,
 }: {
   onOpenRutina: () => void;
   onOpenCalendario: () => void;
   onOpenProgreso: () => void;
+  onOpenResumen: () => void;
   progress: ReturnType<typeof useTrainingProgress>;
   deload: ReturnType<typeof useDeloadCheck>;
+  discomfort: ReturnType<typeof useExerciseDiscomfort>;
 }) {
   const { user } = useAuth();
   const routine = useRoutine();
@@ -468,6 +492,29 @@ function HoyView({
     }
   }
 
+  // La sesión de hoy puede no existir todavía (no se ha guardado ninguna
+  // serie): se crea aquí si hace falta, igual que hace saveSet internamente.
+  async function handleSaveDiscomfort(
+    exerciseId: string,
+    patch: { zona_cuerpo: string; intensidad: number; nota: string | null },
+  ) {
+    try {
+      const sid = await entry.ensureSession();
+      await discomfort.save(sid, exerciseId, patch);
+    } catch (err) {
+      toast.error((err as Error).message || "No se pudo guardar la molestia.");
+    }
+  }
+
+  async function handleRemoveDiscomfort(exerciseId: string) {
+    if (!entry.sessionId) return;
+    try {
+      await discomfort.remove(entry.sessionId, exerciseId);
+    } catch (err) {
+      toast.error((err as Error).message || "No se pudo quitar la molestia.");
+    }
+  }
+
   function openWrapUp() {
     setWrapUpEsfuerzo(entry.esfuerzoPercibido);
     setWrapUpDuracion(entry.duracionMin != null ? String(entry.duracionMin) : "");
@@ -510,6 +557,14 @@ function HoyView({
           </div>
           <div className="flex shrink-0 flex-col items-end gap-2">
             <div className="flex gap-2">
+              <button
+                onClick={onOpenResumen}
+                className="rounded-lg border border-slate-800 bg-slate-900 p-1.5 text-slate-300 transition hover:border-emerald-500 hover:text-white"
+                aria-label="Ver resumen semanal"
+                title="Resumen semanal"
+              >
+                <ClipboardList className="h-4 w-4" />
+              </button>
               <button
                 onClick={onOpenProgreso}
                 className="rounded-lg border border-slate-800 bg-slate-900 p-1.5 text-slate-300 transition hover:border-emerald-500 hover:text-white"
@@ -562,9 +617,17 @@ function HoyView({
                     suggestion={
                       progression.loading ? null : progression.suggest(ex.exercise_id, ex.reps_objetivo)
                     }
+                    discomfortEntry={
+                      entry.sessionId ? discomfort.getEntry(entry.sessionId, ex.exercise_id) : null
+                    }
+                    discomfortWatch={
+                      discomfort.watchList.find((w) => w.exerciseId === ex.exercise_id) ?? null
+                    }
                     onChange={(sets) => setDraftSets((prev) => ({ ...prev, [ex.exercise_id]: sets }))}
                     onSaveRow={(row) => handleSaveRow(ex.exercise_id, row)}
                     onRemoveRow={(row) => handleRemoveRow(ex.exercise_id, row)}
+                    onSaveDiscomfort={(patch) => handleSaveDiscomfort(ex.exercise_id, patch)}
+                    onRemoveDiscomfort={() => handleRemoveDiscomfort(ex.exercise_id)}
                   />
                 ))}
               </div>
@@ -715,20 +778,140 @@ function ProgressionSuggestionBadge({ suggestion }: { suggestion: ProgressionSug
   );
 }
 
+function DiscomfortWidget({
+  entry,
+  onSave,
+  onRemove,
+}: {
+  entry: DiscomfortEntry | null;
+  onSave: (patch: { zona_cuerpo: string; intensidad: number; nota: string | null }) => void;
+  onRemove: () => void;
+}) {
+  const [open, setOpen] = useState(!!entry);
+  const [zona, setZona] = useState<string>(entry?.zona_cuerpo ?? DISCOMFORT_ZONAS[0]);
+  const [intensidad, setIntensidad] = useState(entry?.intensidad ?? 0);
+  const [nota, setNota] = useState(entry?.nota ?? "");
+
+  useEffect(() => {
+    setOpen(!!entry);
+    setZona(entry?.zona_cuerpo ?? DISCOMFORT_ZONAS[0]);
+    setIntensidad(entry?.intensidad ?? 0);
+    setNota(entry?.nota ?? "");
+  }, [entry?.id]);
+
+  function commit(nextIntensidad: number, nextZona: string, nextNota: string) {
+    if (nextIntensidad <= 0) {
+      onRemove();
+      return;
+    }
+    onSave({ zona_cuerpo: nextZona, intensidad: nextIntensidad, nota: nextNota.trim() || null });
+  }
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="mb-3 text-[11px] font-medium text-slate-500 underline decoration-dotted hover:text-slate-300"
+      >
+        + Registrar molestia
+      </button>
+    );
+  }
+
+  const semaforo = discomfortSemaforo(intensidad);
+  const sliderCls =
+    semaforo === "rojo" ? "accent-rose-500" : semaforo === "amarillo" ? "accent-amber-400" : "accent-emerald-500";
+  const textCls =
+    semaforo === "rojo" ? "text-rose-400" : semaforo === "amarillo" ? "text-amber-400" : "text-emerald-400";
+
+  return (
+    <div className="mb-3 space-y-2 rounded-lg border border-slate-800 bg-slate-950 p-3">
+      <div className="flex items-center justify-between">
+        <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+          Molestia (opcional)
+        </label>
+        {entry && (
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              setIntensidad(0);
+              onRemove();
+            }}
+            className="text-[10px] text-slate-500 hover:text-slate-300"
+          >
+            Quitar
+          </button>
+        )}
+      </div>
+
+      <select
+        value={zona}
+        onChange={(e) => {
+          setZona(e.target.value);
+          if (intensidad > 0) commit(intensidad, e.target.value, nota);
+        }}
+        className={inputCls}
+      >
+        {DISCOMFORT_ZONAS.map((z) => (
+          <option key={z} value={z}>
+            {z.charAt(0).toUpperCase() + z.slice(1)}
+          </option>
+        ))}
+      </select>
+
+      <input
+        type="range"
+        min={0}
+        max={10}
+        step={1}
+        value={intensidad}
+        onChange={(e) => setIntensidad(parseInt(e.target.value, 10))}
+        onMouseUp={() => commit(intensidad, zona, nota)}
+        onTouchEnd={() => commit(intensidad, zona, nota)}
+        onBlur={() => commit(intensidad, zona, nota)}
+        className={"w-full " + sliderCls}
+      />
+      <p className={"text-xs font-semibold " + textCls}>
+        {intensidad} · {semaforo}
+      </p>
+
+      <input
+        value={nota}
+        onChange={(e) => setNota(e.target.value)}
+        onBlur={() => {
+          if (intensidad > 0) commit(intensidad, zona, nota);
+        }}
+        placeholder="Nota (opcional)"
+        className={inputCls}
+      />
+    </div>
+  );
+}
+
 function ExerciseSetsCard({
   exercise,
   sets,
   suggestion,
+  discomfortEntry,
+  discomfortWatch,
   onChange,
   onSaveRow,
   onRemoveRow,
+  onSaveDiscomfort,
+  onRemoveDiscomfort,
 }: {
   exercise: RoutineExerciseItem;
   sets: SessionSetDraft[];
   suggestion: ProgressionSuggestion | null;
+  discomfortEntry: DiscomfortEntry | null;
+  discomfortWatch: DiscomfortWatch | null;
   onChange: (sets: SessionSetDraft[]) => void;
   onSaveRow: (row: SessionSetDraft) => void;
   onRemoveRow: (row: SessionSetDraft) => void;
+  onSaveDiscomfort: (patch: { zona_cuerpo: string; intensidad: number; nota: string | null }) => void;
+  onRemoveDiscomfort: () => void;
 }) {
   const targetReps = parseLeadingNumber(exercise.reps_objetivo);
   const targetPeso = exercise.peso_objetivo_kg;
@@ -748,13 +931,24 @@ function ExerciseSetsCard({
 
   return (
     <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-      <div className="mb-1 text-sm font-semibold text-white">{exercise.nombre}</div>
+      <div className="mb-1 flex items-start justify-between gap-2">
+        <span className="text-sm font-semibold text-white">{exercise.nombre}</span>
+        {discomfortWatch && (
+          <span
+            className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-300"
+            title={`${discomfortWatch.zona}: amarillo o rojo en ${discomfortWatch.count} de las últimas 3 sesiones`}
+          >
+            <AlertTriangle className="h-3 w-3" /> A vigilar ({discomfortWatch.zona})
+          </span>
+        )}
+      </div>
       <div className="mb-3 text-xs text-slate-500">
         Objetivo: {exercise.series_objetivo} series · {exercise.reps_objetivo}
         {exercise.peso_objetivo_kg != null && ` · ${exercise.peso_objetivo_kg} kg`}
       </div>
 
       <ProgressionSuggestionBadge suggestion={suggestion} />
+      <DiscomfortWidget entry={discomfortEntry} onSave={onSaveDiscomfort} onRemove={onRemoveDiscomfort} />
       <div className="space-y-1.5">
         {sets.map((s, i) => {
           const status = setDotClass(s, targetReps, targetPeso);
@@ -1839,6 +2033,174 @@ function ProgresoView({
         </section>
 
         <MuscleVolumeSection />
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------ Resumen semanal ------------------------------ */
+
+function ResumenSemanalView({
+  onBack,
+  progress,
+  deload,
+  discomfort,
+}: {
+  onBack: () => void;
+  progress: ReturnType<typeof useTrainingProgress>;
+  deload: ReturnType<typeof useDeloadCheck>;
+  discomfort: ReturnType<typeof useExerciseDiscomfort>;
+}) {
+  const muscleVolume = useMuscleVolume();
+  const exerciseProgress = useExerciseProgress();
+
+  const thisWeekStart = mondayISO(new Date());
+  const weekEnd = addDaysISO(thisWeekStart, 6);
+  const loading =
+    progress.loading || muscleVolume.loading || exerciseProgress.loading || deload.loading || discomfort.loading;
+
+  const cargaSemana = progress.weeklyLoad.find((w) => w.weekStart === thisWeekStart)?.carga ?? null;
+
+  const volumeBucket = muscleVolume.volumeByWeek.get(thisWeekStart) ?? {};
+  const fueraDeRango = MUSCLE_ORDER.map((m) => {
+    const volumen = volumeBucket[m] ?? 0;
+    return { muscle: m, volumen, zone: muscleVolumeZone(m, volumen), landmark: MUSCLE_LANDMARKS[m] };
+  }).filter((v) => v.zone === "insuficiente" || v.zone === "excesivo");
+
+  const prsSemana = exerciseProgress.exercises
+    .flatMap((e) => e.points.filter((p) => p.isPR && p.fecha >= thisWeekStart).map((p) => ({ nombre: e.nombre, ...p })))
+    .sort((a, b) => b.fecha.localeCompare(a.fecha));
+
+  return (
+    <div className="min-h-screen w-full bg-slate-950 px-4 py-8 text-slate-100">
+      <div className="mx-auto max-w-2xl">
+        <button
+          onClick={onBack}
+          className="mb-4 inline-flex items-center gap-1.5 text-sm font-medium text-slate-400 hover:text-slate-200"
+        >
+          <ChevronLeft className="h-4 w-4" /> Volver a Hoy
+        </button>
+
+        <header className="mb-6">
+          <h1 className="text-2xl font-bold tracking-tight text-white">Resumen semanal</h1>
+          <p className="mt-1 text-sm text-slate-400">
+            Semana del {formatShortDate(thisWeekStart)} al {formatShortDate(weekEnd)}
+          </p>
+        </header>
+
+        {loading ? (
+          <p className="text-sm text-slate-400">Cargando…</p>
+        ) : (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4 text-center">
+                <div className="flex items-center justify-center gap-1.5 text-amber-400">
+                  <Flame className="h-4 w-4" />
+                  <span className="text-[10.5px] font-bold uppercase tracking-widest">Racha actual</span>
+                </div>
+                <div className="mt-1 text-2xl font-bold text-white">{progress.currentStreak}</div>
+              </div>
+              <div className="rounded-2xl border border-indigo-500/30 bg-indigo-500/5 p-4 text-center">
+                <div className="flex items-center justify-center gap-1.5 text-indigo-300">
+                  <Trophy className="h-4 w-4" />
+                  <span className="text-[10.5px] font-bold uppercase tracking-widest">Récord</span>
+                </div>
+                <div className="mt-1 text-2xl font-bold text-white">{progress.bestStreak}</div>
+              </div>
+            </div>
+
+            <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+              <p className="text-[10.5px] font-bold uppercase tracking-widest text-emerald-400">
+                Carga total de la semana
+              </p>
+              <p className="mt-1 text-xl font-bold text-white">{cargaSemana ?? "—"}</p>
+              <p className="mt-1 text-[11px] text-slate-600">
+                Esfuerzo percibido × duración, sumado en las sesiones completadas de esta semana.
+              </p>
+            </section>
+
+            <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+              <p className="mb-2 text-[10.5px] font-bold uppercase tracking-widest text-emerald-400">
+                Volumen fuera de rango
+              </p>
+              {fueraDeRango.length === 0 ? (
+                <p className="text-xs text-slate-500">Todo el volumen dentro de rango esta semana.</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {fueraDeRango.map((v) => (
+                    <p key={v.muscle} className="text-xs">
+                      <span className={v.zone === "excesivo" ? "text-rose-400" : "text-amber-400"}>●</span>{" "}
+                      <span className="font-semibold text-slate-200">{v.muscle}</span>
+                      <span className="text-slate-500">
+                        : {v.volumen.toFixed(1)} series —{" "}
+                        {v.zone === "excesivo"
+                          ? `por encima del MRV (${v.landmark.mrv})`
+                          : `por debajo del MEV (${v.landmark.mev})`}
+                      </span>
+                    </p>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+              <p className="mb-2 text-[10.5px] font-bold uppercase tracking-widest text-emerald-400">
+                Récords nuevos esta semana
+              </p>
+              {prsSemana.length === 0 ? (
+                <p className="text-xs text-slate-500">Sin récords nuevos esta semana todavía.</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {prsSemana.map((p, i) => (
+                    <p key={i} className="text-xs">
+                      <Star className="mr-1 inline h-3 w-3 fill-amber-400 text-amber-400" />
+                      <span className="font-semibold text-slate-200">{p.nombre}</span>
+                      <span className="text-slate-500">
+                        {" "}
+                        — {p.e1rm?.toFixed(1)} kg (e1RM) · {formatShortDate(p.fecha)}
+                      </span>
+                    </p>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            {deload.shouldDeload && (
+              <section className="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4">
+                <p className="text-[10.5px] font-bold uppercase tracking-widest text-amber-300">
+                  Posible necesidad de descarga
+                </p>
+                <p className="mt-1 text-xs text-amber-200/80">
+                  {deload.activeCount} de {deload.signals.length} señales activas.
+                </p>
+                <p className="mt-2 text-[11px] text-amber-100/70">Ver detalle completo en Progreso.</p>
+              </section>
+            )}
+
+            <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+              <p className="mb-2 text-[10.5px] font-bold uppercase tracking-widest text-emerald-400">
+                Molestias a vigilar
+              </p>
+              {discomfort.watchList.length === 0 ? (
+                <p className="text-xs text-slate-500">Sin molestias recurrentes detectadas.</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {discomfort.watchList.map((w, i) => (
+                    <p key={i} className="text-xs">
+                      <AlertTriangle className="mr-1 inline h-3 w-3 text-amber-400" />
+                      <span className="font-semibold text-slate-200">{w.nombre}</span>
+                      <span className="text-slate-500">
+                        {" "}
+                        — {w.zona}: amarillo o rojo en {w.count} de las últimas 3 sesiones (más reciente:{" "}
+                        {formatShortDate(w.lastFecha)}, intensidad {w.lastIntensidad})
+                      </span>
+                    </p>
+                  ))}
+                </div>
+              )}
+            </section>
+          </div>
+        )}
       </div>
     </div>
   );
