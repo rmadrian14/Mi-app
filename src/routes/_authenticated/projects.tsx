@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from '@tanstack/react-router';
+import { createFileRoute } from '@tanstack/react-router';
 import React, { useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { Button } from '@/components/ui/button';
@@ -20,10 +20,6 @@ import {
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import { resolveActiveWorkspaceId } from '@/hooks/use-workspace';
-import { useSubscription } from '@/hooks/use-subscription';
-import { PaywallView } from '@/components/paywall-view';
-import { chargeProOverageIfNeeded } from '@/utils/payments.functions';
-import { getStripeEnvironment } from '@/lib/stripe';
 import { uploadInvoicePdfAndSend } from '@/lib/invoice-email.functions';
 import { toast } from 'sonner';
 import { FiscalFinalizeDialog, defaultFinalizeState, type FinalizeState } from '@/components/fiscal-finalize-dialog';
@@ -135,8 +131,6 @@ function fiscalComplete(p: Project): boolean {
 
 function ProjectsPage() {
   const { user } = useAuth();
-  const { status: subStatus, tier, monthlyCount, planLimit, atVerifactuLimit, loading: subLoading } = useSubscription();
-  const navigate = useNavigate();
   const [projects, setProjects] = useState<Project[]>([]);
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -155,7 +149,6 @@ function ProjectsPage() {
   const [emisorNif, setEmisorNif] = useState<string>('');
   const [emisor, setEmisor] = useState<Emisor | null>(null);
   const [finalizeFor, setFinalizeFor] = useState<Project | null>(null);
-  const [upgradeOpen, setUpgradeOpen] = useState<null | { fromTier: 'basic' | 'medium'; suggestedPriceId: string; suggestedLabel: string }>(null);
   const [rectifyFor, setRectifyFor] = useState<Project | null>(null);
   const [rectifyAmount, setRectifyAmount] = useState<string>('');
   const [rectifying, setRectifying] = useState(false);
@@ -390,35 +383,7 @@ function ProjectsPage() {
       setAeatErrorId(p.id);
       return;
     }
-    // Bloqueo por plan: básico (50) → modal upgrade a Intermedio, intermedio (250) → modal upgrade a Pro.
-    if (tier === 'basic' && monthlyCount >= 50) {
-      setUpgradeOpen({ fromTier: 'basic', suggestedPriceId: 'intermedio_monthly', suggestedLabel: 'Plan Intermedio (11,99 €/mes · 250 facturas)' });
-      return;
-    }
-    if (tier === 'medium' && monthlyCount >= 250) {
-      setUpgradeOpen({ fromTier: 'medium', suggestedPriceId: 'pro_monthly', suggestedLabel: 'Plan Pro (19,99 €/mes · 2.500 facturas)' });
-      return;
-    }
-    if (atVerifactuLimit) {
-      toast.error('Has alcanzado el límite mensual de tu plan. Gestiona tu suscripción.');
-      return;
-    }
     setSendingId(p.id);
-
-    // Plan Pro: cargar bloque fijo de 2€ si esta factura inicia un nuevo bloque de 500 sobre 2500.
-    if (tier === 'pro') {
-      try {
-        const env = getStripeEnvironment();
-        const result = await chargeProOverageIfNeeded({
-          data: { invoiceNumberInPeriod: monthlyCount + 1, environment: env },
-        });
-        if (result.charged) {
-          toast.info(`Cargo de 2,00 € aplicado por el bloque de exceso #${result.blockIndex}.`);
-        }
-      } catch (e) {
-        console.warn('Overage charge skipped:', e);
-      }
-    }
 
     const workspace_id = await resolveActiveWorkspaceId(user!.id);
     const state = p.finalizeState;
@@ -616,17 +581,8 @@ function ProjectsPage() {
     }).from(a4Ref.current).save();
   };
 
-  if (!subLoading && subStatus === 'inactive') {
-    return <PaywallView feature="Gestión de Proyectos" />;
-  }
-
   return (
     <div className="p-8 text-slate-200 space-y-6">
-      {tier !== 'none' && planLimit > 0 && tier !== 'pro' && monthlyCount >= planLimit * 0.9 && (
-        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-xs text-amber-200">
-          Has emitido {monthlyCount}/{planLimit} facturas este mes. Cerca del límite de tu plan.
-        </div>
-      )}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Gestión de Proyectos</h1>
         <Button onClick={openCreate}>Crear Nuevo Proyecto</Button>
@@ -955,26 +911,6 @@ function ProjectsPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogAction onClick={() => setAeatErrorId(null)}>Entendido</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog open={upgradeOpen !== null} onOpenChange={(o) => !o && setUpgradeOpen(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Has alcanzado el límite de tu plan</AlertDialogTitle>
-            <AlertDialogDescription>
-              {upgradeOpen?.fromTier === 'basic'
-                ? 'Tu Plan Básico permite hasta 50 facturas/mes. '
-                : 'Tu Plan Intermedio permite hasta 250 facturas/mes. '}
-              Sube al {upgradeOpen?.suggestedLabel} para seguir enviando facturas a la AEAT.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Más tarde</AlertDialogCancel>
-            <AlertDialogAction onClick={() => { setUpgradeOpen(null); navigate({ to: '/pricing' }); }}>
-              Mejorar plan
-            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

@@ -9,9 +9,7 @@ import jsPDF from "jspdf";
 import ExcelJS from "exceljs";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { useSubscription } from "@/hooks/use-subscription";
 import { useAuth } from "@/hooks/use-auth";
-import { PaywallView } from "@/components/paywall-view";
 import {
   useFixedCosts,
   useVariableCosts,
@@ -300,7 +298,6 @@ function Index() {
 
 export function Dashboard({ tab }: { tab: TabKey }) {
   const activeTab = tab;
-  const { status: subStatus, loading: subLoading } = useSubscription();
 
   // Persistent data
   const [expenses, setExpenses] = usePersistentState<Expense[]>("fc.expenses", []);
@@ -375,10 +372,6 @@ export function Dashboard({ tab }: { tab: TabKey }) {
     }
     if (progressPct < 100) celebratedRef.current = false;
   }, [progressPct]);
-
-  if (activeTab === "contabilidad" && !subLoading && subStatus === "inactive") {
-    return <PaywallView feature="Contabilidad" />;
-  }
 
   return (
     <div className="min-h-full w-full max-w-full overflow-x-hidden bg-slate-950 text-slate-100">

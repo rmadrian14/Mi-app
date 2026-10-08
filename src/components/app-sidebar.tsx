@@ -6,7 +6,6 @@ import {
   BookOpenCheck,
   Radar,
   LogOut,
-  Gauge,
   Briefcase,
   CalendarDays,
   Settings,
@@ -135,7 +134,6 @@ export function AppSidebar() {
         })}
       </SidebarContent>
       <SidebarFooter className="border-t border-slate-800 bg-slate-950 p-2">
-        {user && !collapsed && <PlanUsageCard userId={user.id} />}
         {user ? (
           <div className="flex items-center gap-2 rounded-lg bg-slate-900/60 px-2 py-2">
             <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-gradient-to-br from-emerald-500 to-indigo-500 text-xs font-bold text-white">
@@ -164,74 +162,6 @@ export function AppSidebar() {
         )}
       </SidebarFooter>
     </Sidebar>
-  );
-}
-
-function PlanUsageCard({ userId }: { userId: string }) {
-  const [loading, setLoading] = useState(true);
-  const [plan, setPlan] = useState<"basic" | "pro">("basic");
-  const [limit, setLimit] = useState(10);
-  const [count, setCount] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const now = new Date();
-      const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-      const end = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
-      const [{ count: c }, { data: sub }] = await Promise.all([
-        supabase
-          .from("invoices")
-          .select("id", { count: "exact", head: true })
-          .eq("usuario_id", userId)
-          .gte("fecha_emision", start)
-          .lt("fecha_emision", end),
-        supabase
-          .from("user_subscriptions")
-          .select("plan_type, monthly_limit")
-          .eq("id", userId)
-          .maybeSingle(),
-      ]);
-      if (cancelled) return;
-      setCount(c ?? 0);
-      if (sub) {
-        setPlan((sub.plan_type as "basic" | "pro") ?? "basic");
-        setLimit(sub.monthly_limit ?? 10);
-      }
-      setLoading(false);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [userId]);
-
-  const pct = Math.min(100, Math.round((count / Math.max(limit, 1)) * 100));
-  const near = pct >= 80;
-
-  return (
-    <div className="mb-2 rounded-lg border border-slate-800 bg-slate-900/60 p-2.5">
-      <div className="mb-1 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-        <span className="flex items-center gap-1.5">
-          <Gauge className="h-3 w-3 text-emerald-400" />
-          Plan {plan === "pro" ? "Pro" : "Básico"}
-        </span>
-        <span className={near ? "text-amber-300" : "text-slate-500"}>
-          {loading ? "…" : `${count}/${limit}`}
-        </span>
-      </div>
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-800">
-        <div
-          className={
-            "h-full transition-all " +
-            (near
-              ? "bg-gradient-to-r from-amber-500 to-rose-500"
-              : "bg-gradient-to-r from-emerald-500 to-indigo-500")
-          }
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      <div className="mt-1 text-[10px] text-slate-500">Facturas este mes</div>
-    </div>
   );
 }
 

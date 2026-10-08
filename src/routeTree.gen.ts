@@ -20,14 +20,12 @@ import { Route as AuthenticatedOnboardingRouteImport } from './routes/_authentic
 import { Route as AuthenticatedOrganizationRouteImport } from './routes/_authenticated/organization'
 import { Route as AuthenticatedPlanningRouteImport } from './routes/_authenticated/planning'
 import { Route as AuthenticatedPortfolioRouteImport } from './routes/_authenticated/portfolio'
-import { Route as AuthenticatedPricingRouteImport } from './routes/_authenticated/pricing'
 import { Route as AuthenticatedProjectsRouteImport } from './routes/_authenticated/projects'
 import { Route as AuthenticatedRadarRouteImport } from './routes/_authenticated/radar'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedTrainingRouteImport } from './routes/_authenticated/training'
 import { Route as AuthenticatedWorkspacesRouteImport } from './routes/_authenticated/workspaces'
 import { Route as InviteTokenRouteImport } from './routes/invite.$token'
-import { Route as ApiPublicPaymentsWebhookRouteImport } from './routes/api/public/payments/webhook'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -84,11 +82,6 @@ const AuthenticatedPortfolioRoute = AuthenticatedPortfolioRouteImport.update({
   path: '/portfolio',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
-const AuthenticatedPricingRoute = AuthenticatedPricingRouteImport.update({
-  id: '/pricing',
-  path: '/pricing',
-  getParentRoute: () => AuthenticatedRouteRoute,
-} as any)
 const AuthenticatedProjectsRoute = AuthenticatedProjectsRouteImport.update({
   id: '/projects',
   path: '/projects',
@@ -119,12 +112,6 @@ const InviteTokenRoute = InviteTokenRouteImport.update({
   path: '/invite/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiPublicPaymentsWebhookRoute =
-  ApiPublicPaymentsWebhookRouteImport.update({
-    id: '/api/public/payments/webhook',
-    path: '/api/public/payments/webhook',
-    getParentRoute: () => rootRouteImport,
-  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -137,14 +124,12 @@ export interface FileRoutesByFullPath {
   '/organization': typeof AuthenticatedOrganizationRoute
   '/planning': typeof AuthenticatedPlanningRoute
   '/portfolio': typeof AuthenticatedPortfolioRoute
-  '/pricing': typeof AuthenticatedPricingRoute
   '/projects': typeof AuthenticatedProjectsRoute
   '/radar': typeof AuthenticatedRadarRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/training': typeof AuthenticatedTrainingRoute
   '/workspaces': typeof AuthenticatedWorkspacesRoute
   '/invite/$token': typeof InviteTokenRoute
-  '/api/public/payments/webhook': typeof ApiPublicPaymentsWebhookRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -157,14 +142,12 @@ export interface FileRoutesByTo {
   '/organization': typeof AuthenticatedOrganizationRoute
   '/planning': typeof AuthenticatedPlanningRoute
   '/portfolio': typeof AuthenticatedPortfolioRoute
-  '/pricing': typeof AuthenticatedPricingRoute
   '/projects': typeof AuthenticatedProjectsRoute
   '/radar': typeof AuthenticatedRadarRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/training': typeof AuthenticatedTrainingRoute
   '/workspaces': typeof AuthenticatedWorkspacesRoute
   '/invite/$token': typeof InviteTokenRoute
-  '/api/public/payments/webhook': typeof ApiPublicPaymentsWebhookRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -179,14 +162,12 @@ export interface FileRoutesById {
   '/_authenticated/organization': typeof AuthenticatedOrganizationRoute
   '/_authenticated/planning': typeof AuthenticatedPlanningRoute
   '/_authenticated/portfolio': typeof AuthenticatedPortfolioRoute
-  '/_authenticated/pricing': typeof AuthenticatedPricingRoute
   '/_authenticated/projects': typeof AuthenticatedProjectsRoute
   '/_authenticated/radar': typeof AuthenticatedRadarRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/_authenticated/training': typeof AuthenticatedTrainingRoute
   '/_authenticated/workspaces': typeof AuthenticatedWorkspacesRoute
   '/invite/$token': typeof InviteTokenRoute
-  '/api/public/payments/webhook': typeof ApiPublicPaymentsWebhookRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -201,14 +182,12 @@ export interface FileRouteTypes {
     | '/organization'
     | '/planning'
     | '/portfolio'
-    | '/pricing'
     | '/projects'
     | '/radar'
     | '/settings'
     | '/training'
     | '/workspaces'
     | '/invite/$token'
-    | '/api/public/payments/webhook'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -221,14 +200,12 @@ export interface FileRouteTypes {
     | '/organization'
     | '/planning'
     | '/portfolio'
-    | '/pricing'
     | '/projects'
     | '/radar'
     | '/settings'
     | '/training'
     | '/workspaces'
     | '/invite/$token'
-    | '/api/public/payments/webhook'
   id:
     | '__root__'
     | '/'
@@ -242,14 +219,12 @@ export interface FileRouteTypes {
     | '/_authenticated/organization'
     | '/_authenticated/planning'
     | '/_authenticated/portfolio'
-    | '/_authenticated/pricing'
     | '/_authenticated/projects'
     | '/_authenticated/radar'
     | '/_authenticated/settings'
     | '/_authenticated/training'
     | '/_authenticated/workspaces'
     | '/invite/$token'
-    | '/api/public/payments/webhook'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -257,7 +232,6 @@ export interface RootRouteChildren {
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
   InviteTokenRoute: typeof InviteTokenRoute
-  ApiPublicPaymentsWebhookRoute: typeof ApiPublicPaymentsWebhookRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -339,13 +313,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedPortfolioRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/_authenticated/pricing': {
-      id: '/_authenticated/pricing'
-      path: '/pricing'
-      fullPath: '/pricing'
-      preLoaderRoute: typeof AuthenticatedPricingRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
     '/_authenticated/projects': {
       id: '/_authenticated/projects'
       path: '/projects'
@@ -388,13 +355,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof InviteTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/public/payments/webhook': {
-      id: '/api/public/payments/webhook'
-      path: '/api/public/payments/webhook'
-      fullPath: '/api/public/payments/webhook'
-      preLoaderRoute: typeof ApiPublicPaymentsWebhookRouteImport
-      parentRoute: typeof rootRouteImport
-    }
   }
 }
 
@@ -407,7 +367,6 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedOrganizationRoute: typeof AuthenticatedOrganizationRoute
   AuthenticatedPlanningRoute: typeof AuthenticatedPlanningRoute
   AuthenticatedPortfolioRoute: typeof AuthenticatedPortfolioRoute
-  AuthenticatedPricingRoute: typeof AuthenticatedPricingRoute
   AuthenticatedProjectsRoute: typeof AuthenticatedProjectsRoute
   AuthenticatedRadarRoute: typeof AuthenticatedRadarRoute
   AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
@@ -424,7 +383,6 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedOrganizationRoute: AuthenticatedOrganizationRoute,
   AuthenticatedPlanningRoute: AuthenticatedPlanningRoute,
   AuthenticatedPortfolioRoute: AuthenticatedPortfolioRoute,
-  AuthenticatedPricingRoute: AuthenticatedPricingRoute,
   AuthenticatedProjectsRoute: AuthenticatedProjectsRoute,
   AuthenticatedRadarRoute: AuthenticatedRadarRoute,
   AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
@@ -440,7 +398,6 @@ const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
   InviteTokenRoute: InviteTokenRoute,
-  ApiPublicPaymentsWebhookRoute: ApiPublicPaymentsWebhookRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
