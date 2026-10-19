@@ -11,6 +11,7 @@ export type PersonalProfile = {
   altura_cm: number | null;
   objetivo: string | null;
   limitaciones: string | null;
+  sexo: string | null;
   updated_at: string;
   created_at: string;
 };

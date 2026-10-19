@@ -347,6 +347,75 @@ export type Database = {
           },
         ]
       }
+      foods: {
+        Row: {
+          categoria: string
+          codigo_barras: string | null
+          comidas: string[]
+          contiene: string[]
+          created_at: string
+          factor_cocinado: number | null
+          frecuencia: number
+          gramos_unidad: number | null
+          grasa_100: number
+          hidratos_100: number
+          id: string
+          kcal_100: number
+          nombre: string
+          origen: string
+          porcion_max_g: number
+          porcion_min_g: number
+          proteina_100: number
+          unidad_nombre: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          categoria: string
+          codigo_barras?: string | null
+          comidas?: string[]
+          contiene?: string[]
+          created_at?: string
+          factor_cocinado?: number | null
+          frecuencia?: number
+          gramos_unidad?: number | null
+          grasa_100: number
+          hidratos_100: number
+          id?: string
+          kcal_100: number
+          nombre: string
+          origen?: string
+          porcion_max_g?: number
+          porcion_min_g?: number
+          proteina_100: number
+          unidad_nombre?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          categoria?: string
+          codigo_barras?: string | null
+          comidas?: string[]
+          contiene?: string[]
+          created_at?: string
+          factor_cocinado?: number | null
+          frecuencia?: number
+          gramos_unidad?: number | null
+          grasa_100?: number
+          hidratos_100?: number
+          id?: string
+          kcal_100?: number
+          nombre?: string
+          origen?: string
+          porcion_max_g?: number
+          porcion_min_g?: number
+          proteina_100?: number
+          unidad_nombre?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       invoices: {
         Row: {
           base_imponible: number
@@ -441,6 +510,147 @@ export type Database = {
           },
         ]
       }
+      menu_items: {
+        Row: {
+          comida: string
+          created_at: string
+          dia_semana: number
+          food_id: string
+          gramos: number
+          id: string
+          menu_id: string
+          orden: number
+          user_id: string
+        }
+        Insert: {
+          comida: string
+          created_at?: string
+          dia_semana: number
+          food_id: string
+          gramos: number
+          id?: string
+          menu_id: string
+          orden?: number
+          user_id: string
+        }
+        Update: {
+          comida?: string
+          created_at?: string
+          dia_semana?: number
+          food_id?: string
+          gramos?: number
+          id?: string
+          menu_id?: string
+          orden?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "menu_items_food_id_fkey"
+            columns: ["food_id"]
+            isOneToOne: false
+            referencedRelation: "foods"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "menu_items_menu_id_fkey"
+            columns: ["menu_id"]
+            isOneToOne: false
+            referencedRelation: "menus"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      menus: {
+        Row: {
+          compra_marcados: string[]
+          created_at: string
+          id: string
+          nombre: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          compra_marcados?: string[]
+          created_at?: string
+          id?: string
+          nombre: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          compra_marcados?: string[]
+          created_at?: string
+          id?: string
+          nombre?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      nutrition_profile: {
+        Row: {
+          alimentos_excluidos: string | null
+          comidas_por_dia: number
+          created_at: string
+          dias_entreno: number
+          editado_manual: boolean
+          grasa_g: number
+          hidratos_g: number
+          id: string
+          kcal_mantenimiento: number | null
+          kcal_objetivo: number
+          menu_activo_id: string | null
+          nivel_actividad: string
+          objetivo: string
+          proteina_g: number
+          restricciones: string[]
+          ritmo: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          alimentos_excluidos?: string | null
+          comidas_por_dia?: number
+          created_at?: string
+          dias_entreno?: number
+          editado_manual?: boolean
+          grasa_g: number
+          hidratos_g: number
+          id?: string
+          kcal_mantenimiento?: number | null
+          kcal_objetivo: number
+          menu_activo_id?: string | null
+          nivel_actividad: string
+          objetivo: string
+          proteina_g: number
+          restricciones?: string[]
+          ritmo?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          alimentos_excluidos?: string | null
+          comidas_por_dia?: number
+          created_at?: string
+          dias_entreno?: number
+          editado_manual?: boolean
+          grasa_g?: number
+          hidratos_g?: number
+          id?: string
+          kcal_mantenimiento?: number | null
+          kcal_objetivo?: number
+          menu_activo_id?: string | null
+          nivel_actividad?: string
+          objetivo?: string
+          proteina_g?: number
+          restricciones?: string[]
+          ritmo?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       personal_profile: {
         Row: {
           altura_cm: number | null
@@ -450,6 +660,7 @@ export type Database = {
           limitaciones: string | null
           objetivo: string | null
           peso_kg: number | null
+          sexo: string | null
           updated_at: string
           user_id: string
         }
@@ -461,6 +672,7 @@ export type Database = {
           limitaciones?: string | null
           objetivo?: string | null
           peso_kg?: number | null
+          sexo?: string | null
           updated_at?: string
           user_id: string
         }
@@ -472,6 +684,7 @@ export type Database = {
           limitaciones?: string | null
           objetivo?: string | null
           peso_kg?: number | null
+          sexo?: string | null
           updated_at?: string
           user_id?: string
         }
@@ -885,6 +1098,30 @@ export type Database = {
           },
         ]
       }
+      weight_log: {
+        Row: {
+          created_at: string
+          fecha: string
+          id: string
+          peso_kg: number
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          fecha?: string
+          id?: string
+          peso_kg: number
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          fecha?: string
+          id?: string
+          peso_kg?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
       workspace_audit_log: {
         Row: {
           action: string
@@ -1035,6 +1272,15 @@ export type Database = {
     }
     Functions: {
       accept_workspace_invite: { Args: { _token: string }; Returns: string }
+      actualizar_gramos: { Args: { p_cambios: Json }; Returns: number }
+      crear_menu: {
+        Args: { p_items?: Json; p_nombre: string; p_user_id?: string }
+        Returns: Database["public"]["Tables"]["menus"]["Row"]
+      }
+      reemplazar_dia: {
+        Args: { p_comidas: string[] | null; p_dia: number; p_items: Json; p_menu_id: string; p_user_id?: string }
+        Returns: Database["public"]["Tables"]["menu_items"]["Row"][]
+      }
       can_write_workspace: {
         Args: { _uid: string; _ws: string }
         Returns: boolean
