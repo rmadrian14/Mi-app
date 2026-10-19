@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { leerTodo } from "@/lib/supabase-paging";
 import { useAuth } from "@/hooks/use-auth";
 import { seedDefaultRoutine } from "@/lib/training-seed";
 
@@ -620,12 +621,17 @@ export function useTrainingProgress() {
       return;
     }
     setLoading(true);
-    const { data } = await supabase
-      .from("training_sessions")
-      .select("fecha, routine_day_id, es_extra, completado, esfuerzo_percibido, duracion_min")
-      .eq("user_id", user.id)
-      .lte("fecha", todayISODate())
-      .order("fecha");
+    const { data } = await leerTodo<any>((desde, hasta) =>
+      supabase
+        .from("training_sessions")
+        .select("fecha, routine_day_id, es_extra, completado, esfuerzo_percibido, duracion_min")
+        .eq("user_id", user.id)
+        .lte("fecha", todayISODate())
+        .order("fecha")
+        .order("creado_en")
+        .order("id")
+        .range(desde, hasta),
+    );
     setSessions((data ?? []) as SessionSummaryRow[]);
     setLoading(false);
   }, [user, profile]);
@@ -802,10 +808,15 @@ export function useExerciseProgress() {
     }
     setLoading(true);
     const [setsRes, exercisesRes] = await Promise.all([
-      supabase
-        .from("session_sets")
-        .select("exercise_id, numero_serie, reps_realizadas, peso_realizado_kg, session:session_id ( fecha )")
-        .eq("user_id", user.id),
+      leerTodo<any>((desde, hasta) =>
+        supabase
+          .from("session_sets")
+          .select("exercise_id, numero_serie, reps_realizadas, peso_realizado_kg, session:session_id ( fecha )")
+          .eq("user_id", user.id)
+          .order("created_at")
+          .order("id")
+          .range(desde, hasta),
+      ),
       supabase.from("exercises").select("id, nombre").eq("user_id", user.id),
     ]);
 
@@ -969,10 +980,15 @@ export function useMuscleVolume() {
     }
     setLoading(true);
     const [setsRes, exercisesRes] = await Promise.all([
-      supabase
-        .from("session_sets")
-        .select("exercise_id, session:session_id ( fecha )")
-        .eq("user_id", user.id),
+      leerTodo<any>((desde, hasta) =>
+        supabase
+          .from("session_sets")
+          .select("exercise_id, session:session_id ( fecha )")
+          .eq("user_id", user.id)
+          .order("created_at")
+          .order("id")
+          .range(desde, hasta),
+      ),
       supabase.from("exercises").select("id, grupo_muscular, musculos_secundarios").eq("user_id", user.id),
     ]);
 
@@ -1081,15 +1097,25 @@ export function useDeloadCheck() {
     }
     setLoading(true);
     const [sessionsRes, setsRes, exercisesRes] = await Promise.all([
-      supabase
-        .from("training_sessions")
-        .select("id, fecha, routine_day_id, es_extra, completado, esfuerzo_percibido, duracion_min")
-        .eq("user_id", user.id)
-        .order("fecha"),
-      supabase
-        .from("session_sets")
-        .select("session_id, exercise_id, reps_realizadas, peso_realizado_kg")
-        .eq("user_id", user.id),
+      leerTodo<any>((desde, hasta) =>
+        supabase
+          .from("training_sessions")
+          .select("id, fecha, routine_day_id, es_extra, completado, esfuerzo_percibido, duracion_min")
+          .eq("user_id", user.id)
+          .order("fecha")
+          .order("creado_en")
+          .order("id")
+          .range(desde, hasta),
+      ),
+      leerTodo<any>((desde, hasta) =>
+        supabase
+          .from("session_sets")
+          .select("session_id, exercise_id, reps_realizadas, peso_realizado_kg")
+          .eq("user_id", user.id)
+          .order("created_at")
+          .order("id")
+          .range(desde, hasta),
+      ),
       supabase.from("exercises").select("id, nombre, grupo_muscular, musculos_secundarios").eq("user_id", user.id),
     ]);
 
@@ -1350,15 +1376,25 @@ export function useProgressionSuggestions() {
     }
     setLoading(true);
     const [sessionsRes, setsRes] = await Promise.all([
-      supabase
-        .from("training_sessions")
-        .select("id, fecha, esfuerzo_percibido")
-        .eq("user_id", user.id)
-        .order("fecha"),
-      supabase
-        .from("session_sets")
-        .select("session_id, exercise_id, reps_realizadas, peso_realizado_kg")
-        .eq("user_id", user.id),
+      leerTodo<any>((desde, hasta) =>
+        supabase
+          .from("training_sessions")
+          .select("id, fecha, esfuerzo_percibido")
+          .eq("user_id", user.id)
+          .order("fecha")
+          .order("creado_en")
+          .order("id")
+          .range(desde, hasta),
+      ),
+      leerTodo<any>((desde, hasta) =>
+        supabase
+          .from("session_sets")
+          .select("session_id, exercise_id, reps_realizadas, peso_realizado_kg")
+          .eq("user_id", user.id)
+          .order("created_at")
+          .order("id")
+          .range(desde, hasta),
+      ),
     ]);
     setSessions((sessionsRes.data ?? []) as ProgSessionRow[]);
     setSets((setsRes.data ?? []) as ProgSetRow[]);
