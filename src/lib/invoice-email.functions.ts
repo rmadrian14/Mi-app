@@ -7,7 +7,7 @@ const SIGNED_URL_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 days
 
 export const uploadInvoicePdfAndSend = createServerFn({ method: 'POST' })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: {
+  .validator((input: {
     projectId: string;
     filename: string;
     pdfBase64: string;
