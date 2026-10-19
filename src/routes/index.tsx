@@ -1,10 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Link } from "@tanstack/react-router";
 import { useState, useMemo, useEffect, useRef } from "react";
-import negocioIcon from "@/assets/icons/negocio.jfif";
-import entrenamientoIcon from "@/assets/icons/entrenamiento.jfif";
-import planificacionIcon from "@/assets/icons/planificacion.jfif";
-import alimentacionIcon from "@/assets/icons/alimentacion.jfif";
+import negocioIcon from "@/assets/icons/negocio.webp";
+import entrenamientoIcon from "@/assets/icons/entrenamiento.webp";
+import planificacionIcon from "@/assets/icons/planificacion.webp";
+import alimentacionIcon from "@/assets/icons/alimentacion.webp";
 import type { Worksheet } from "exceljs";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -283,7 +283,7 @@ function Index() {
               className="group flex flex-col gap-3 rounded-2xl border border-slate-800 bg-slate-900 p-6 text-left transition hover:border-emerald-500/40 hover:bg-slate-900/80"
             >
               <span className="block h-20 w-20 overflow-hidden">
-                <img src={m.image} alt="" className="h-full w-full scale-[2] object-cover" />
+                <img src={m.image} alt="" width={80} height={80} className="h-full w-full object-cover" />
               </span>
               <h2 className="text-lg font-semibold text-white">{m.title}</h2>
               <p className="text-sm text-slate-400">{m.description}</p>
