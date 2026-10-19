@@ -6,13 +6,25 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
 
+// Solo se aceptan rutas internas ("/training"), nunca direcciones externas
+// ("https://…" o "//…"), para que /auth?redirect= no sirva de redirección abierta.
+function rutaInterna(valor: unknown): string | undefined {
+  if (typeof valor !== "string") return undefined;
+  return valor.startsWith("/") && !valor.startsWith("//") && !valor.startsWith("/\\") ? valor : undefined;
+}
+
 export const Route = createFileRoute("/auth")({
+  validateSearch: (search: Record<string, unknown>): { redirect?: string } => ({
+    redirect: rutaInterna(search.redirect),
+  }),
   component: AuthPage,
   head: () => ({ meta: [{ title: "Acceder · Estimac" }] }),
 });
 
 function AuthPage() {
   const navigate = useNavigate();
+  const { redirect } = Route.useSearch();
+  const destino = redirect ?? "/accounting";
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -20,9 +32,9 @@ function AuthPage() {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
-      if (data.session) navigate({ to: "/accounting" });
+      if (data.session) navigate({ to: destino });
     });
-  }, [navigate]);
+  }, [navigate, destino]);
 
   async function handleEmail(e: React.FormEvent) {
     e.preventDefault();
@@ -32,14 +44,14 @@ function AuthPage() {
         const { error } = await supabase.auth.signUp({
           email,
           password,
-          options: { emailRedirectTo: window.location.origin + "/accounting" },
+          options: { emailRedirectTo: window.location.origin + destino },
         });
         if (error) throw error;
         toast.success("Cuenta creada. Revisa tu email para confirmar.");
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
-        navigate({ to: "/accounting" });
+        navigate({ to: destino });
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Error de autenticación");
@@ -51,7 +63,7 @@ function AuthPage() {
   async function handleGoogle() {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: window.location.origin + "/accounting" },
+      options: { redirectTo: window.location.origin + destino },
     });
     if (error) {
       toast.error(error.message ?? "No se pudo iniciar sesión con Google");
