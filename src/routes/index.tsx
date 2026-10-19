@@ -5,8 +5,7 @@ import negocioIcon from "@/assets/icons/negocio.jfif";
 import entrenamientoIcon from "@/assets/icons/entrenamiento.jfif";
 import planificacionIcon from "@/assets/icons/planificacion.jfif";
 import alimentacionIcon from "@/assets/icons/alimentacion.jfif";
-import jsPDF from "jspdf";
-import ExcelJS from "exceljs";
+import type { Worksheet } from "exceljs";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
@@ -1033,6 +1032,9 @@ function ContabilidadView() {
   const exportExcel = async () => {
     setExporting(true);
     try {
+      // Carga diferida: exceljs usa APIs de Node que no existen en Cloudflare
+      // Workers y rompería el servidor entero si se importara al arrancar.
+      const ExcelJS = (await import("exceljs")).default;
       const wb = new ExcelJS.Workbook();
       wb.creator = "Contabilidad";
       wb.created = new Date();
@@ -1042,7 +1044,7 @@ function ContabilidadView() {
       const FONT = { name: "Arial" as const };
 
       const paintCells = (
-        ws: ExcelJS.Worksheet,
+        ws: Worksheet,
         rowNumber: number,
         cols: number,
         argb: string,
