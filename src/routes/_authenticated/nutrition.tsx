@@ -20,6 +20,7 @@ import { AlimentosView } from "@/components/nutrition/alimentos-view";
 import { MenuView } from "@/components/nutrition/menu-view";
 import { CompraView } from "@/components/nutrition/compra-view";
 import { PesoView } from "@/components/nutrition/peso-view";
+import { DiarioView } from "@/components/nutrition/diario-view";
 import { parseMantenimiento } from "@/components/nutrition/objetivos-campos";
 
 export const Route = createFileRoute("/_authenticated/nutrition")({
@@ -27,8 +28,9 @@ export const Route = createFileRoute("/_authenticated/nutrition")({
   head: () => ({ meta: [{ title: "Alimentación · Veract" }] }),
 });
 
-type Pestana = "menu" | "alimentos" | "compra" | "peso" | "perfil";
+type Pestana = "hoy" | "menu" | "alimentos" | "compra" | "peso" | "perfil";
 const PESTANAS: { id: Pestana; label: string }[] = [
+  { id: "hoy", label: "Hoy" },
   { id: "menu", label: "Menú" },
   { id: "alimentos", label: "Alimentos" },
   { id: "compra", label: "Compra" },
@@ -76,7 +78,7 @@ function NutritionPage() {
   const foods = useFoods();
   const menus = useMenus();
   const peso = useWeightLog();
-  const [pestana, setPestana] = useState<Pestana>("menu");
+  const [pestana, setPestana] = useState<Pestana>("hoy");
 
   if (np.loading || personal.loading) {
     return (
@@ -177,14 +179,14 @@ function NutritionPage() {
           </div>
         </header>
 
-        <nav className="mb-5 grid grid-cols-5 gap-1 rounded-xl border border-slate-800 bg-slate-900/60 p-1">
+        <nav className="mb-5 flex gap-1 overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/60 p-1">
           {PESTANAS.map((p) => (
             <button
               key={p.id}
               type="button"
               onClick={() => setPestana(p.id)}
               className={
-                "rounded-lg px-1 py-2 text-[13px] font-semibold transition sm:px-2 sm:text-sm " +
+                "flex-1 whitespace-nowrap rounded-lg px-3 py-2 text-[13px] font-semibold transition sm:text-sm " +
                 (pestana === p.id ? "bg-emerald-500/15 text-emerald-300" : "text-slate-400 hover:text-white")
               }
             >
@@ -193,6 +195,14 @@ function NutritionPage() {
           ))}
         </nav>
 
+        {pestana === "hoy" && (
+          <DiarioView
+            profile={perfil}
+            foods={foods.foods}
+            menus={menus}
+            onIrAAlimentos={() => setPestana("alimentos")}
+          />
+        )}
         {pestana === "menu" && <MenuView profile={perfil} foods={foods.foods} menus={menus} />}
         {pestana === "alimentos" && (
           <AlimentosView
