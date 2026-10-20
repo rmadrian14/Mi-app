@@ -1,5 +1,6 @@
 import { createServerFn } from '@tanstack/react-start';
 import { requireSupabaseAuth } from '@/integrations/supabase/auth-middleware';
+import { validarEnvioFactura } from '@/lib/invoice-email-validation';
 
 // Dev-phase placeholder sender. Replace when the real domain is configured.
 const TEST_FROM = 'facturas@test-veract.com';
@@ -7,15 +8,7 @@ const SIGNED_URL_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 days
 
 export const uploadInvoicePdfAndSend = createServerFn({ method: 'POST' })
   .middleware([requireSupabaseAuth])
-  .validator((input: {
-    projectId: string;
-    filename: string;
-    pdfBase64: string;
-    recipientEmail: string;
-    customerName?: string;
-    invoiceNumber?: string;
-    totalAmount?: number;
-  }) => input)
+  .validator(validarEnvioFactura)
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
 
