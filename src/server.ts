@@ -2,6 +2,7 @@ import "./lib/error-capture";
 
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
+import { mantenerSupabaseActivo } from "./lib/supabase-keepalive";
 
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
@@ -76,5 +77,16 @@ export default {
       console.error(error);
       return brandedErrorResponse();
     }
+  },
+
+  // Tarea diaria (ver "triggers" en wrangler.jsonc): una consulta mínima a
+  // Supabase para que el proyecto gratuito no se pause por inactividad.
+  async scheduled(_controller: unknown, _env: unknown, ctx: { waitUntil(p: Promise<unknown>): void }) {
+    ctx.waitUntil(
+      mantenerSupabaseActivo({
+        url: import.meta.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL,
+        clave: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_PUBLISHABLE_KEY,
+      }).then((r) => console.log(`[keepalive] ${r.ok ? "OK" : "FALLO"} (${r.estado}) ${r.detalle}`)),
+    );
   },
 };

@@ -4,4 +4,8 @@
   "compatibility_date": "2025-09-24",
   "compatibility_flags": ["nodejs_compat"],
   "main": "src/server.ts",
+  // Cada día a las 05:17 UTC: ver scheduled() en src/server.ts.
+  "triggers": { "crons": ["17 5 * * *"] },
+  // Registros del Worker (errores, tarea diaria) visibles en el panel de Cloudflare.
+  "observability": { "enabled": true },
 }
