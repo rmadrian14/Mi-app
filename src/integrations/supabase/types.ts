@@ -347,6 +347,62 @@ export type Database = {
           },
         ]
       }
+      food_log: {
+        Row: {
+          comida: string
+          created_at: string
+          fecha: string
+          food_id: string | null
+          gramos: number | null
+          grasa_g: number
+          hidratos_g: number
+          id: string
+          kcal: number
+          nombre: string
+          orden: number
+          proteina_g: number
+          user_id: string
+        }
+        Insert: {
+          comida: string
+          created_at?: string
+          fecha: string
+          food_id?: string | null
+          gramos?: number | null
+          grasa_g?: number
+          hidratos_g?: number
+          id?: string
+          kcal: number
+          nombre: string
+          orden?: number
+          proteina_g?: number
+          user_id: string
+        }
+        Update: {
+          comida?: string
+          created_at?: string
+          fecha?: string
+          food_id?: string | null
+          gramos?: number | null
+          grasa_g?: number
+          hidratos_g?: number
+          id?: string
+          kcal?: number
+          nombre?: string
+          orden?: number
+          proteina_g?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "food_log_food_id_fkey"
+            columns: ["food_id"]
+            isOneToOne: false
+            referencedRelation: "foods"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       foods: {
         Row: {
           categoria: string
