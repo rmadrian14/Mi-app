@@ -30,3 +30,6 @@ npm-debug.log*
 pnpm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Copias de seguridad locales de los datos (npm run backup): contienen datos personales
+backups/

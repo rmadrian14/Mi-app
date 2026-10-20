@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "test": "vitest run",
+    "backup": "node scripts/backup-datos.mjs",
     "format": "prettier --write ."
   },
   "dependencies": {
