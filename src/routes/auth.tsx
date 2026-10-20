@@ -18,7 +18,7 @@ export const Route = createFileRoute("/auth")({
     redirect: rutaInterna(search.redirect),
   }),
   component: AuthPage,
-  head: () => ({ meta: [{ title: "Acceder · Estimac" }] }),
+  head: () => ({ meta: [{ title: "Acceder · Veract" }] }),
 });
 
 function AuthPage() {

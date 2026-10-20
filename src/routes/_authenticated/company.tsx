@@ -14,7 +14,7 @@ import {
 
 export const Route = createFileRoute("/_authenticated/company")({
   component: CompanyPage,
-  head: () => ({ meta: [{ title: "Datos del emisor · Estimac" }] }),
+  head: () => ({ meta: [{ title: "Datos del emisor · Veract" }] }),
 });
 
 type CompanySettings = {

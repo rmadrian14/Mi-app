@@ -12,7 +12,7 @@ import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/clients")({
   component: ClientsPage,
-  head: () => ({ meta: [{ title: "Clientes · Estimac" }] }),
+  head: () => ({ meta: [{ title: "Clientes · Veract" }] }),
 });
 
 type Client = {
