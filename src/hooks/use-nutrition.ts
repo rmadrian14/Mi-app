@@ -4,6 +4,7 @@ import type { Json } from "@/integrations/supabase/types";
 import { useAuth } from "@/hooks/use-auth";
 import { SEED_FOODS } from "@/lib/food-seed";
 import { type PesoRegistro, hoyISO, ordenar } from "@/lib/weight-trend";
+import { escalarEntrada, sumarDias, type EntradaDiario, type NuevaEntrada } from "@/lib/food-log";
 import type {
   CategoriaAlimento,
   Comida,
@@ -572,4 +573,133 @@ export function useWeightLog() {
   }, []);
 
   return { registros, loading, error, registrar, eliminar, refresh, hoy: hoyISO };
+}
+
+/* ------------------------------ Diario de comidas ------------------------------ */
+
+const LOG_COLS = "id, fecha, comida, food_id, nombre, gramos, kcal, proteina_g, grasa_g, hidratos_g, orden, created_at";
+const DIAS_RECIENTES = 30;
+
+function normalizarEntrada(r: any): EntradaDiario {
+  return {
+    id: r.id,
+    fecha: r.fecha,
+    comida: r.comida,
+    food_id: r.food_id ?? null,
+    nombre: r.nombre,
+    gramos: r.gramos == null ? null : Number(r.gramos),
+    kcal: Number(r.kcal),
+    proteina_g: Number(r.proteina_g),
+    grasa_g: Number(r.grasa_g),
+    hidratos_g: Number(r.hidratos_g),
+    orden: Number(r.orden),
+    created_at: r.created_at,
+  };
+}
+
+const porOrden = (a: EntradaDiario, b: EntradaDiario) =>
+  a.orden - b.orden || (a.created_at ?? "").localeCompare(b.created_at ?? "");
+
+// Lo que se come en una fecha (AAAA-MM-DD) y, aparte, el historial de los últimos
+// días para sugerir "recientes". Cada entrada guarda sus kcal y macros ya
+// calculados (ver src/lib/food-log.ts).
+export function useFoodLog(fecha: string) {
+  const { user } = useAuth();
+  const [entradas, setEntradas] = useState<EntradaDiario[]>([]);
+  const [historial, setHistorial] = useState<EntradaDiario[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    if (!user) {
+      setEntradas([]);
+      setHistorial([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    const desde = sumarDias(hoyISO(), -DIAS_RECIENTES);
+    const [dia, hist] = await Promise.all([
+      supabase
+        .from("food_log")
+        .select(LOG_COLS)
+        .eq("user_id", user.id)
+        .eq("fecha", fecha)
+        .order("orden")
+        .order("created_at"),
+      supabase
+        .from("food_log")
+        .select(LOG_COLS)
+        .eq("user_id", user.id)
+        .gte("fecha", desde)
+        .order("fecha", { ascending: false })
+        .order("created_at", { ascending: false })
+        .limit(300),
+    ]);
+    const fallo = dia.error ?? hist.error;
+    if (fallo) {
+      setError(fallo.message);
+      setEntradas([]);
+      setHistorial([]);
+    } else {
+      setError(null);
+      setEntradas(((dia.data ?? []) as any[]).map(normalizarEntrada).sort(porOrden));
+      setHistorial(((hist.data ?? []) as any[]).map(normalizarEntrada));
+    }
+    setLoading(false);
+  }, [user, fecha]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  const anadir = useCallback(
+    async (nuevas: NuevaEntrada[]) => {
+      if (!user) throw new Error("No hay sesión activa.");
+      if (!nuevas.length) return [];
+      const { data, error } = await supabase
+        .from("food_log")
+        .insert(nuevas.map((n) => ({ ...n, user_id: user.id })))
+        .select(LOG_COLS);
+      if (error) throw error;
+      const creadas = ((data ?? []) as any[]).map(normalizarEntrada);
+      setEntradas((prev) => [...prev, ...creadas.filter((c) => c.fecha === fecha)].sort(porOrden));
+      setHistorial((prev) => [...creadas, ...prev]);
+      return creadas;
+    },
+    [user, fecha],
+  );
+
+  // Cambia los gramos de una entrada y reescala sus kcal y macros en proporción.
+  const cambiarGramos = useCallback(
+    async (id: string, gramos: number) => {
+      const actual = entradas.find((e) => e.id === id);
+      const nueva = actual ? escalarEntrada(actual, gramos) : null;
+      if (!nueva) throw new Error("La cantidad no es válida.");
+      const { error } = await supabase
+        .from("food_log")
+        .update({
+          gramos: nueva.gramos,
+          kcal: nueva.kcal,
+          proteina_g: nueva.proteina_g,
+          grasa_g: nueva.grasa_g,
+          hidratos_g: nueva.hidratos_g,
+        })
+        .eq("id", id);
+      if (error) throw error;
+      const poner = (l: EntradaDiario[]) => l.map((e) => (e.id === id ? nueva : e));
+      setEntradas(poner);
+      setHistorial(poner);
+    },
+    [entradas],
+  );
+
+  const quitar = useCallback(async (id: string) => {
+    const { error } = await supabase.from("food_log").delete().eq("id", id);
+    if (error) throw error;
+    setEntradas((prev) => prev.filter((e) => e.id !== id));
+    setHistorial((prev) => prev.filter((e) => e.id !== id));
+  }, []);
+
+  return { entradas, historial, loading, error, anadir, cambiarGramos, quitar, refresh };
 }
