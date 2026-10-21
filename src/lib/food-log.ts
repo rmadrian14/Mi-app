@@ -137,24 +137,47 @@ export function recientes(entradas: EntradaDiario[], max = 8): Reciente[] {
 export function buscarAlimentos<T extends AlimentoDiario>(foods: T[], texto: string, comida: Comida, max = 8): T[] {
   const palabras = normalizarTexto(texto).split(/\s+/).filter(Boolean);
   if (!palabras.length) return [];
-  const clasificar = (encaja: (nombre: string, tokens: string[], w: string) => boolean) => {
+  const opciones = palabras.map(variantes);
+  const clasificar = (encaja: (nombre: string, tokens: string[], vs: string[]) => boolean) => {
     const puntuados: { f: T; p: number }[] = [];
     for (const f of foods) {
       const n = normalizarTexto(f.nombre);
       const tokens = n.split(/[^a-z0-9]+/).filter(Boolean);
-      if (!palabras.every((w) => encaja(n, tokens, w))) continue;
+      if (!opciones.every((vs) => encaja(n, tokens, vs))) continue;
+      const primera = opciones[0];
       let p = 0;
-      if (n.startsWith(palabras[0])) p -= 4;
-      if (tokens.some((tok) => tok.startsWith(palabras[0]))) p -= 2;
+      if (primera.some((v) => n.startsWith(v))) p -= 4;
+      if (primera.some((v) => tokens.includes(v))) p -= 3; // la palabra exacta gana a "pan" dentro de "panceta"
+      if (primera.some((v) => tokens.some((tok) => tok.startsWith(v)))) p -= 2;
       if (f.comidas?.includes(comida)) p -= 1;
       p += n.length / 1000; // a igualdad, los nombres más cortos primero
       puntuados.push({ f, p });
     }
     return puntuados;
   };
-  let encontrados = clasificar((_n, tokens, w) => tokens.some((tok) => tok.startsWith(w)));
-  if (!encontrados.length) encontrados = clasificar((n, _t, w) => n.includes(w));
+  let encontrados = clasificar((_n, tokens, vs) => vs.some((v) => tokens.some((tok) => tok.startsWith(v))));
+  if (!encontrados.length) encontrados = clasificar((n, _t, vs) => vs.some((v) => n.includes(v)));
   return encontrados.sort((a, b) => a.p - b.p || a.f.nombre.localeCompare(b.f.nombre)).slice(0, max).map((x) => x.f);
+}
+
+// Lo que se escribe no siempre es el nombre del alimento: plurales ("huevos", "limones") y
+// palabras de uso común que en la biblioteca llevan otro nombre ("macarrones" → pasta,
+// "judías" → alubias). Cada palabra se busca con todas sus variantes.
+const SINONIMOS: Record<string, string[]> = {
+  macarron: ["pasta"], espagueti: ["pasta"], spaghetti: ["pasta"], fideo: ["pasta"], tallarin: ["pasta"], penne: ["pasta"],
+  judia: ["alubia"], alubia: ["judia"], habichuela: ["alubia"], frijol: ["alubia"],
+  papa: ["patata"], yogurt: ["yogur"], cacahuate: ["cacahuete"], mani: ["cacahuete"],
+  nuez: ["nuec"], birra: ["cerveza"], olivas: ["aceituna"],
+  colacao: ["cacao"], nutella: ["cacao"], nocilla: ["cacao"],
+  vacuno: ["ternera"], buey: ["ternera"], york: ["cocido"],
+};
+
+function variantes(w: string): string[] {
+  const out = new Set([w]);
+  if (w.length > 3 && w.endsWith("s")) out.add(w.slice(0, -1)); // huevos → huevo, tomates → tomate
+  if (w.length > 4 && w.endsWith("es")) out.add(w.slice(0, -2)); // limones → limon, macarrones → macarron
+  for (const v of [...out]) for (const s of SINONIMOS[v] ?? []) out.add(s);
+  return [...out];
 }
 
 /* ------------------------------ Copiar desde el menú ------------------------------ */

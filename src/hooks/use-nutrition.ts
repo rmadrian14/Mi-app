@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { Json } from "@/integrations/supabase/types";
 import { useAuth } from "@/hooks/use-auth";
-import { SEED_FOODS } from "@/lib/food-seed";
+import { RENOMBRADOS, SEED_FOODS } from "@/lib/food-seed";
 import { type PesoRegistro, hoyISO, ordenar } from "@/lib/weight-trend";
 import { escalarEntrada, sumarDias, type EntradaDiario, type NuevaEntrada } from "@/lib/food-log";
 import type {
@@ -176,6 +176,17 @@ export function useFoods() {
   // nombre) y nunca pisa los que el usuario haya editado.
   const cargarBasicos = useCallback(async () => {
     if (!user) throw new Error("No hay sesión activa.");
+    // Nombres corregidos: se renombra el alimento que ya tienes para no duplicarlo. Si el nombre
+    // nuevo ya existe (error de unicidad) no se toca nada.
+    for (const [viejo, nuevo] of RENOMBRADOS) {
+      const { error: errRen } = await supabase
+        .from("foods")
+        .update({ nombre: nuevo })
+        .eq("user_id", user.id)
+        .eq("nombre", viejo)
+        .eq("origen", "semilla");
+      if (errRen && errRen.code !== "23505") throw errRen;
+    }
     const rows = SEED_FOODS.map((s) => ({
       user_id: user.id,
       nombre: s.nombre,

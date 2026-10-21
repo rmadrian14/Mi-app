@@ -134,6 +134,22 @@ describe("buscarAlimentos", () => {
   it("si así no sale nada, admite la coincidencia en mitad de la palabra", () => {
     expect(buscarAlimentos(foods, "rroz", "comida").map((f) => f.id)).toEqual(["f3"]);
   });
+  it("entiende plurales y palabras de uso común: huevos, macarrones, judías, nuez", () => {
+    const pasta = { ...arroz, id: "f6", nombre: "Pasta (cruda)" };
+    const alubias = { ...arroz, id: "f7", nombre: "Alubias blancas (cocidas, escurridas)" };
+    const nueces = { ...arroz, id: "f8", nombre: "Nueces" };
+    const todos = [...foods, pasta, alubias, nueces];
+    expect(buscarAlimentos(todos, "huevos", "desayuno").map((f) => f.id)[0]).toBe("f2");
+    expect(buscarAlimentos(todos, "macarrones", "comida").map((f) => f.id)).toEqual(["f6"]);
+    expect(buscarAlimentos(todos, "espaguetis", "comida").map((f) => f.id)).toEqual(["f6"]);
+    expect(buscarAlimentos(todos, "judías blancas", "comida").map((f) => f.id)).toEqual(["f7"]);
+    expect(buscarAlimentos(todos, "nuez", "merienda").map((f) => f.id)).toEqual(["f8"]);
+  });
+  it("la palabra exacta va antes que una que solo empieza igual (pan antes que panceta)", () => {
+    const pan = { ...arroz, id: "f9", nombre: "Pan de barra / baguette" };
+    const panceta = { ...arroz, id: "f10", nombre: "Panceta" };
+    expect(buscarAlimentos([panceta, pan], "pan", "desayuno").map((f) => f.id)).toEqual(["f9", "f10"]);
+  });
   it("las palabras pueden venir en cualquier orden y con tildes", () => {
     expect(buscarAlimentos(foods, "CRUDO arroz", "comida").map((f) => f.id)).toEqual(["f3"]);
   });

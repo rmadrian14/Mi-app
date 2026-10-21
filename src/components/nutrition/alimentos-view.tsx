@@ -11,6 +11,7 @@ import {
   macrosDe,
   type CategoriaAlimento,
 } from "@/lib/nutrition";
+import { buscarAlimentos } from "@/lib/food-log";
 import { buscarPorCodigo, buscarPorTexto, type ProductoOff } from "@/lib/openfoodfacts";
 import { Aviso, Card, Field, MacroPills, SectionTitle, btnGhost, btnPrimary, btnSecondary, fmt, inputCls } from "./common";
 import { useDialogos } from "./dialogs";
@@ -393,10 +394,10 @@ export function AlimentosView({
   const { confirmar, dialogos } = useDialogos();
 
   const filtrados = useMemo(() => {
-    const q = busqueda.trim().toLowerCase();
-    return foods.filter(
-      (f) => (categoria === "todas" || f.categoria === categoria) && (!q || f.nombre.toLowerCase().includes(q)),
-    );
+    const q = busqueda.trim();
+    // Con texto se usa el mismo buscador que el diario: sin tildes, con plurales y sinónimos, mejores primero.
+    const base = q ? buscarAlimentos(foods, q, "comida", foods.length) : foods;
+    return base.filter((f) => categoria === "todas" || f.categoria === categoria);
   }, [foods, busqueda, categoria]);
 
   const calcFood = foods.find((f) => f.id === calcId) ?? null;
@@ -534,14 +535,14 @@ export function AlimentosView({
       {foods.length > 0 && (
         <div className="flex items-center justify-between gap-3 rounded-xl border border-dashed border-slate-800 px-3 py-2.5">
           <p className="text-[11px] text-slate-500">
-            Valores de la base de datos USDA FoodData Central. Revisa la etiqueta de los productos envasados.
+            Valores de BEDCA (base de datos española de composición de alimentos) y USDA FoodData Central; los platos son estimaciones calculadas desde su receta. Revisa la etiqueta de los productos envasados.
           </p>
           <button
             type="button"
-            onClick={() => onCargarBasicos().then(() => toast.success("Alimentos básicos restaurados (sin tocar los que ya tienes)."))}
+            onClick={() => onCargarBasicos().then(() => toast.success("Biblioteca actualizada (sin tocar los alimentos que ya tienes)."))}
             className={btnGhost + " shrink-0"}
           >
-            Restaurar básicos
+            Actualizar biblioteca
           </button>
         </div>
       )}
