@@ -1224,6 +1224,8 @@ export type Database = {
         Args: { p_items?: Json; p_nombre: string; p_user_id?: string }
         Returns: Database["public"]["Tables"]["menus"]["Row"]
       }
+      intercambiar_dias_rutina: { Args: { p_dia_a: number; p_dia_b: number }; Returns: undefined }
+      sustituir_entrenamiento_dia: { Args: { p_dia_destino: number; p_dia_origen: number }; Returns: undefined }
       reemplazar_dia: {
         Args: { p_comidas: string[] | null; p_dia: number; p_items: Json; p_menu_id: string; p_user_id?: string }
         Returns: Database["public"]["Tables"]["menu_items"]["Row"][]
