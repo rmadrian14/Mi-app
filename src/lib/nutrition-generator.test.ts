@@ -47,7 +47,7 @@ function totalDe(items: { foodId: string; gramos: number }[]): Macros {
 
 describe("biblioteca de alimentos (semilla)", () => {
   it("tiene un buen número de alimentos y todas las categorías", () => {
-    expect(SEED_FOODS.length).toBeGreaterThanOrEqual(140);
+    expect(SEED_FOODS.length).toBeGreaterThanOrEqual(400);
     for (const c of CATEGORIAS) expect(SEED_FOODS.some((s) => s.categoria === c)).toBe(true);
   });
 
@@ -62,7 +62,6 @@ describe("biblioteca de alimentos (semilla)", () => {
       expect(s.proteina_100 + s.grasa_100 + s.hidratos_100, s.nombre).toBeLessThanOrEqual(100.5);
       expect(s.porcion_min_g, s.nombre).toBeGreaterThan(0);
       expect(s.porcion_max_g, s.nombre).toBeGreaterThanOrEqual(s.porcion_min_g);
-      expect(s.comidas.length, s.nombre).toBeGreaterThan(0);
       for (const c of s.comidas) expect(COMIDAS_VALIDAS, s.nombre).toContain(c);
       for (const m of s.contiene) expect(MARCAS_CONOCIDAS.has(m), `${s.nombre}: marca desconocida ${m}`).toBe(true);
       expect(s.frecuencia, s.nombre).toBeGreaterThanOrEqual(0.1);
@@ -74,10 +73,32 @@ describe("biblioteca de alimentos (semilla)", () => {
 
   it("las calorías declaradas cuadran con 4P + 4H + 9G (±15 % o ±25 kcal)", () => {
     for (const s of SEED_FOODS) {
-      const atwater = 4 * s.proteina_100 + 4 * s.hidratos_100 + 9 * s.grasa_100;
+      const atwater = 4 * s.proteina_100 + 4 * s.hidratos_100 + 9 * s.grasa_100 + 7 * (s.alcohol_100 ?? 0);
       const tolerancia = Math.max(25, s.kcal_100 * 0.15);
       expect(Math.abs(atwater - s.kcal_100), `${s.nombre}: ${s.kcal_100} vs ${atwater.toFixed(0)}`).toBeLessThanOrEqual(tolerancia);
     }
+  });
+
+  it("el generador de menús tiene de dónde elegir en cada categoría (comidas vacías = solo diario)", () => {
+    const elegibles = SEED_FOODS.filter((s) => s.comidas.length > 0);
+    expect(elegibles.length).toBeGreaterThanOrEqual(240);
+    for (const c of ["proteina", "hidrato", "verdura", "fruta", "lacteo", "grasa", "legumbre"]) {
+      expect(elegibles.filter((s) => s.categoria === c).length, c).toBeGreaterThanOrEqual(8);
+    }
+    // Lo que no conviene en un menú automático queda fuera: embutidos grasos, bollería, dulces, bebidas y platos.
+    const fuera = ["Chorizo", "Sobrasada", "Croissant", "Churros", "Cerveza (con alcohol)", "Salmorejo cordobés (receta casera)", "Bacón (crudo)"];
+    for (const n of fuera) expect(SEED_FOODS.find((s) => s.nombre === n)?.comidas, n).toEqual([]);
+  });
+
+  it("incluye los cortes concretos y los genéricos de la cocina española", () => {
+    const nombres = new Set(SEED_FOODS.map((s) => s.nombre));
+    for (const n of [
+      "Contramuslo de pollo sin piel (crudo)", "Contramuslo de pollo con piel (crudo)", "Muslo de pollo (jamoncito) con piel (crudo)",
+      "Magro de cerdo (pierna, crudo, sin grasa visible)", "Lomo de cerdo magro (crudo, sin grasa visible)", "Pescado blanco (genérico, crudo)",
+      "Jamón serrano", "Queso manchego", "Rape (crudo)", "Lubina (cruda)", "Aceite de oliva virgen extra (AOVE)",
+    ]) expect(nombres.has(n), n).toBe(true);
+    // El nombre antiguo (impreciso) ya no existe
+    expect(nombres.has("Muslo de pollo sin piel (crudo)")).toBe(false);
   });
 
   it("los alimentos con unidad la tienen dentro de su rango de ración", () => {

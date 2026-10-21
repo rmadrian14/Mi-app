@@ -1,4 +1,6 @@
-// Biblioteca inicial de alimentos (valores por 100 g). Generada a partir de
+// Biblioteca inicial de alimentos básicos (valores por 100 g). Los alimentos de la cocina
+// española y los platos típicos están en food-seed-espana.ts y food-recetas.ts; aquí se
+// juntan los tres en SEED_FOODS. Generada a partir de
 // USDA FoodData Central (Foundation Foods y SR Legacy), datos de dominio
 // público: "fdc" es el identificador del alimento en esa base. Los nombres, las
 // raciones mín/máx, las comidas, las marcas de alérgenos/dieta y el factor de
@@ -9,15 +11,19 @@
 // pesa (crudo/seco) a cocinado (>1 absorbe agua: arroz, pasta, legumbres secas;
 // <1 pierde agua: carnes y pescados). Solo sirve para mostrar un equivalente.
 import type { CategoriaAlimento } from "@/lib/nutrition";
+import { SEED_ESPANA } from "./food-seed-espana";
+import { RECETAS, platosDesdeRecetas } from "./food-recetas";
 
 export type SeedFood = {
   nombre: string;
   categoria: CategoriaAlimento;
   fdc: number | null;
+  bedca?: number | null; // identificador en BEDCA (Base de Datos Española de Composición de Alimentos)
   kcal_100: number;
   proteina_100: number;
   grasa_100: number;
   hidratos_100: number;
+  alcohol_100?: number; // g de alcohol por 100 g; sus kcal ya van dentro de kcal_100
   gramos_unidad: number | null;
   unidad_nombre: string | null;
   porcion_min_g: number;
@@ -28,9 +34,9 @@ export type SeedFood = {
   frecuencia: number;
 };
 
-export const SEED_FOODS: SeedFood[] = [
+export const SEED_BASE: SeedFood[] = [
   {nombre: "Pechuga de pollo (cruda)", categoria: "proteina", fdc: 2646170, kcal_100: 112, proteina_100: 22.5, grasa_100: 1.9, hidratos_100: 0, gramos_unidad: null, unidad_nombre: null, porcion_min_g: 80, porcion_max_g: 350, comidas: ["comida","cena"], contiene: ["carne"], factor_cocinado: 0.75, frecuencia: 1.6},
-  {nombre: "Muslo de pollo sin piel (crudo)", categoria: "proteina", fdc: 2646171, kcal_100: 149, proteina_100: 18.6, grasa_100: 7.9, hidratos_100: 0, gramos_unidad: null, unidad_nombre: null, porcion_min_g: 80, porcion_max_g: 350, comidas: ["comida","cena"], contiene: ["carne"], factor_cocinado: 0.75, frecuencia: 1},
+  {nombre: "Contramuslo de pollo sin piel (crudo)", categoria: "proteina", fdc: 2646171, kcal_100: 149, proteina_100: 18.6, grasa_100: 7.9, hidratos_100: 0, gramos_unidad: null, unidad_nombre: null, porcion_min_g: 80, porcion_max_g: 350, comidas: ["comida","cena"], contiene: ["carne"], factor_cocinado: 0.75, frecuencia: 1},
   {nombre: "Pechuga de pavo (cruda)", categoria: "proteina", fdc: 171098, kcal_100: 114, proteina_100: 23.7, grasa_100: 1.5, hidratos_100: 0.1, gramos_unidad: null, unidad_nombre: null, porcion_min_g: 80, porcion_max_g: 350, comidas: ["comida","cena"], contiene: ["carne"], factor_cocinado: 0.75, frecuencia: 1},
   {nombre: "Carne picada de pavo 93 % magra (cruda)", categoria: "proteina", fdc: 2514747, kcal_100: 158, proteina_100: 17.3, grasa_100: 9.6, hidratos_100: 0, gramos_unidad: null, unidad_nombre: null, porcion_min_g: 80, porcion_max_g: 300, comidas: ["comida","cena"], contiene: ["carne"], factor_cocinado: 0.75, frecuencia: 1.1},
   {nombre: "Ternera magra, redondo (cruda)", categoria: "proteina", fdc: 2646173, kcal_100: 146, proteina_100: 21.5, grasa_100: 5.7, hidratos_100: 0.9, gramos_unidad: null, unidad_nombre: null, porcion_min_g: 80, porcion_max_g: 300, comidas: ["comida","cena"], contiene: ["carne"], factor_cocinado: 0.75, frecuencia: 1.1},
@@ -189,3 +195,12 @@ export const SEED_FOODS: SeedFood[] = [
   // típicos de un concentrado de suero; sustitúyelos por los de tu etiqueta.
   { nombre: "Proteína de suero en polvo (valores típicos, revisa tu etiqueta)", categoria: "proteina", fdc: null, kcal_100: 400, proteina_100: 80, grasa_100: 6, hidratos_100: 8, gramos_unidad: null, unidad_nombre: null, porcion_min_g: 20, porcion_max_g: 60, comidas: ["desayuno", "media_manana", "merienda"], contiene: ["lacteos"], factor_cocinado: null, frecuencia: 0.5 },
 ];
+
+// Alimentos básicos + cocina española + platos calculados desde su receta.
+const BIBLIOTECA_SIN_PLATOS: SeedFood[] = [...SEED_BASE, ...SEED_ESPANA];
+export const SEED_PLATOS: SeedFood[] = platosDesdeRecetas(RECETAS, BIBLIOTECA_SIN_PLATOS).platos;
+export const SEED_FOODS: SeedFood[] = [...BIBLIOTECA_SIN_PLATOS, ...SEED_PLATOS];
+
+// Alimentos cuyo nombre se corrigió. Al actualizar la biblioteca se renombra el antiguo (si lo tienes)
+// en lugar de añadir un duplicado.
+export const RENOMBRADOS: [string, string][] = [["Muslo de pollo sin piel (crudo)", "Contramuslo de pollo sin piel (crudo)"]];
