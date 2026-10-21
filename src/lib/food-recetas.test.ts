@@ -26,7 +26,7 @@ describe("platos típicos calculados desde su receta", () => {
       for (const [n, g] of r.ingredientes) expect(g, `${r.nombre}: ${n}`).toBeGreaterThan(0);
     }
     for (const p of SEED_PLATOS) {
-      expect(p.kcal_100, p.nombre).toBeGreaterThan(20);
+      expect(p.kcal_100, p.nombre).toBeGreaterThan(10);
       expect(p.kcal_100, p.nombre).toBeLessThan(450);
       expect(p.proteina_100 + p.grasa_100 + p.hidratos_100, p.nombre).toBeLessThanOrEqual(100);
       expect(p.comidas, p.nombre).toEqual([]);
@@ -43,6 +43,23 @@ describe("platos típicos calculados desde su receta", () => {
     expect(s.kcal_100).toBeGreaterThan(110);
     expect(s.kcal_100).toBeLessThan(140);
     expect(s.unidad_nombre).toBe("ración");
+  });
+
+  it("cafés y combinados: kcal por taza o vaso, con el alcohol contado", () => {
+    const por = (prefijo: string) => {
+      const p = SEED_PLATOS.find((x) => x.nombre.startsWith(prefijo))!;
+      return { kcal: (p.kcal_100 * p.gramos_unidad!) / 100, p };
+    };
+    const entera = por("Café con leche, leche entera");
+    expect(entera.kcal).toBeGreaterThan(50);
+    expect(entera.kcal).toBeLessThan(75);
+    expect(entera.p.unidad_nombre).toBe("taza");
+    expect(por("Café con leche, leche desnatada").kcal).toBeLessThan(entera.kcal);
+    const gin = por("Gin-tonic");
+    expect(gin.kcal).toBeGreaterThan(140);
+    expect(gin.kcal).toBeLessThan(190);
+    expect(gin.p.alcohol_100, "el alcohol de la ginebra pasa al combinado").toBeGreaterThan(5);
+    expect(por("Tinto de verano").p.contiene).toContain("sulfitos");
   });
 
   it("croquetas: se cuentan por unidades y heredan los alérgenos de sus ingredientes", () => {

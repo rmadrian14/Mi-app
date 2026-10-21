@@ -80,6 +80,23 @@ export const RECETAS: Receta[] = [
   { nombre: "Sopa de pollo con fideos (receta casera)", raciones: 4, ingredientes: [["Contramuslo de pollo con piel (crudo)", 400], ["Zanahoria", 150], ["Puerro", 100], ["Apio", 50], ["Pasta (cruda)", 80]], pesoFinal: 1800, racion: 450 },
   { nombre: "Espaguetis con tomate (receta casera)", raciones: 1, ingredientes: [["Pasta (cruda)", 100], ["Tomate frito (conserva)", 120], ["Aceite de oliva virgen extra (AOVE)", 5]], pesoFinal: 330 },
   { nombre: "Pan con chocolate (bocadillo de merienda)", raciones: 1, ingredientes: [["Pan de barra / baguette", 60], ["Chocolate negro 70-85 % cacao", 25]], pesoFinal: 85 },
+  { nombre: "Café con leche, leche entera (taza)", raciones: 1, ingredientes: [["Café solo (espresso o americano)", 100], ["Leche entera", 100]], pesoFinal: 200, unidad: [200, "taza"] },
+  { nombre: "Café con leche, leche semidesnatada (taza)", raciones: 1, ingredientes: [["Café solo (espresso o americano)", 100], ["Leche semidesnatada (2 % grasa)", 100]], pesoFinal: 200, unidad: [200, "taza"] },
+  { nombre: "Café con leche, leche desnatada (taza)", raciones: 1, ingredientes: [["Café solo (espresso o americano)", 100], ["Leche desnatada", 100]], pesoFinal: 200, unidad: [200, "taza"] },
+  { nombre: "Café con leche, bebida de avena (taza)", raciones: 1, ingredientes: [["Café solo (espresso o americano)", 100], ["Bebida de avena sin azúcar", 100]], pesoFinal: 200, unidad: [200, "taza"] },
+  { nombre: "Café con leche, bebida de soja (taza)", raciones: 1, ingredientes: [["Café solo (espresso o americano)", 100], ["Bebida de soja sin azúcar", 100]], pesoFinal: 200, unidad: [200, "taza"] },
+  { nombre: "Café con leche, bebida de almendra (taza)", raciones: 1, ingredientes: [["Café solo (espresso o americano)", 100], ["Bebida de almendra sin azúcar", 100]], pesoFinal: 200, unidad: [200, "taza"] },
+  { nombre: "Cortado, leche entera", raciones: 1, ingredientes: [["Café solo (espresso o americano)", 50], ["Leche entera", 50]], pesoFinal: 100, unidad: [100, "cortado"] },
+  { nombre: "Capuchino, leche entera", raciones: 1, ingredientes: [["Café solo (espresso o americano)", 60], ["Leche entera", 120]], pesoFinal: 180, unidad: [180, "taza"] },
+  { nombre: "Café bombón (con leche condensada)", raciones: 1, ingredientes: [["Café solo (espresso o americano)", 35], ["Leche condensada", 35]], pesoFinal: 70, unidad: [70, "bombón"] },
+  { nombre: "Leche con cacao soluble, leche semidesnatada (taza)", raciones: 1, ingredientes: [["Leche semidesnatada (2 % grasa)", 200], ["Cacao en polvo soluble (azucarado)", 15]], pesoFinal: 215, unidad: [215, "taza"] },
+  { nombre: "Leche con cacao soluble, leche entera (taza)", raciones: 1, ingredientes: [["Leche entera", 200], ["Cacao en polvo soluble (azucarado)", 15]], pesoFinal: 215, unidad: [215, "taza"] },
+  { nombre: "Tinto de verano (vino tinto y refresco de limón)", raciones: 1, ingredientes: [["Vino tinto", 100], ["Refresco de limón", 100]], pesoFinal: 200, unidad: [200, "vaso"] },
+  { nombre: "Calimocho (vino tinto y cola)", raciones: 1, ingredientes: [["Vino tinto", 100], ["Refresco de cola", 100]], pesoFinal: 200, unidad: [200, "vaso"] },
+  { nombre: "Clara (cerveza con refresco de limón)", raciones: 1, ingredientes: [["Cerveza (con alcohol)", 165], ["Refresco de limón", 165]], pesoFinal: 330, unidad: [330, "tercio"] },
+  { nombre: "Cubata de ron con cola", raciones: 1, ingredientes: [["Ron", 50], ["Refresco de cola", 150]], pesoFinal: 200, unidad: [200, "cubata"] },
+  { nombre: "Gin-tonic", raciones: 1, ingredientes: [["Ginebra", 50], ["Tónica", 150]], pesoFinal: 200, unidad: [200, "copa"] },
+  { nombre: "Whisky con cola", raciones: 1, ingredientes: [["Whisky", 50], ["Refresco de cola", 150]], pesoFinal: 200, unidad: [200, "cubata"] },
 ];
 
 const r1 = (x: number) => Math.round(x * 10) / 10;
@@ -88,7 +105,7 @@ const r1 = (x: number) => Math.round(x * 10) / 10;
 // Devuelve también los ingredientes que no se han encontrado, que no debería haber ninguno.
 export function platosDesdeRecetas(
   recetas: Receta[],
-  foods: Pick<SeedFood, "nombre" | "kcal_100" | "proteina_100" | "grasa_100" | "hidratos_100" | "contiene">[],
+  foods: Pick<SeedFood, "nombre" | "kcal_100" | "proteina_100" | "grasa_100" | "hidratos_100" | "alcohol_100" | "contiene">[],
 ): { platos: SeedFood[]; faltan: string[] } {
   const porNombre = new Map(foods.map((f) => [f.nombre, f]));
   const faltan: string[] = [];
@@ -98,6 +115,7 @@ export function platosDesdeRecetas(
     let p = 0;
     let g = 0;
     let h = 0;
+    let alcohol = 0;
     const marcas = new Set<string>();
     for (const [nombre, gramos] of r.ingredientes) {
       const f = porNombre.get(nombre);
@@ -109,6 +127,7 @@ export function platosDesdeRecetas(
       p += (f.proteina_100 * gramos) / 100;
       g += (f.grasa_100 * gramos) / 100;
       h += (f.hidratos_100 * gramos) / 100;
+      alcohol += ((f.alcohol_100 ?? 0) * gramos) / 100;
       for (const m of f.contiene) marcas.add(m);
     }
     const por100 = 100 / r.pesoFinal;
@@ -124,6 +143,7 @@ export function platosDesdeRecetas(
       proteina_100: r1(p * por100),
       grasa_100: r1(g * por100),
       hidratos_100: r1(h * por100),
+      ...(alcohol > 0 ? { alcohol_100: r1(alcohol * por100) } : {}),
       gramos_unidad: unidadG,
       unidad_nombre: unidadNombre,
       porcion_min_g: Math.max(5, Math.round(unidadG * 0.5)),
