@@ -143,6 +143,16 @@ export type RoutineDayWithDetails = {
   habitos: RoutineHabit[];
 };
 
+// Errores de las funciones SQL de la rutina en un mensaje claro para el usuario.
+function errorRutina(error: { code?: string; message?: string }): Error {
+  const m = error.message ?? "";
+  if (error.code === "PGRST202" || /could not find the function|schema cache/i.test(m)) {
+    return new Error("Falta aplicar en Supabase la migración «rutina_mover_dias». Pégala en el SQL Editor y vuelve a intentarlo.");
+  }
+  if (/No se encuentra uno de los días/i.test(m)) return new Error("No se ha encontrado uno de los días de tu rutina.");
+  return new Error(m || "No se ha podido cambiar la rutina.");
+}
+
 export function useRoutine() {
   const { user } = useAuth();
   const [days, setDays] = useState<RoutineDayWithDetails[]>([]);
@@ -253,6 +263,26 @@ export function useRoutine() {
     [refresh],
   );
 
+  // Cambiar un entrenamiento de día de la semana (intercambia sitio con el que estuviera allí)
+  // y poner en un día una copia del entrenamiento de otro. Son operaciones atómicas en la base de datos.
+  const intercambiarDias = useCallback(
+    async (diaA: number, diaB: number) => {
+      const { error } = await supabase.rpc("intercambiar_dias_rutina", { p_dia_a: diaA, p_dia_b: diaB });
+      if (error) throw errorRutina(error);
+      await refresh();
+    },
+    [refresh],
+  );
+
+  const sustituirEntrenamiento = useCallback(
+    async (diaDestino: number, diaOrigen: number) => {
+      const { error } = await supabase.rpc("sustituir_entrenamiento_dia", { p_dia_destino: diaDestino, p_dia_origen: diaOrigen });
+      if (error) throw errorRutina(error);
+      await refresh();
+    },
+    [refresh],
+  );
+
   const createExercise = useCallback(
     async (input: {
       nombre: string;
@@ -298,6 +328,8 @@ export function useRoutine() {
     updateRoutineExercise,
     createExercise,
     updateExercise,
+    intercambiarDias,
+    sustituirEntrenamiento,
   };
 }
 

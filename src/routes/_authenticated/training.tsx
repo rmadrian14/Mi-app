@@ -32,8 +32,12 @@ import {
   TrendingUp,
   ClipboardList,
   AlertTriangle,
+  ArrowLeftRight,
+  Copy,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
+import { useDialogos } from "@/components/nutrition/dialogs";
+import { describirIntercambio, describirSustitucion, entrenamientosParaCopiar } from "@/lib/routine-plan";
 import {
   usePersonalProfile,
   useRoutine,
@@ -2234,7 +2238,7 @@ function MiRutinaView({ onBack }: { onBack: () => void }) {
         {routine.loading ? (
           <p className="text-sm text-slate-400">Cargando…</p>
         ) : day ? (
-          <DayEditor day={day} routine={routine} />
+          <DayEditor day={day} routine={routine} onDiaMovido={setSelectedDow} />
         ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {routine.days.map((d) => (
@@ -2271,11 +2275,49 @@ function MiRutinaView({ onBack }: { onBack: () => void }) {
 function DayEditor({
   day,
   routine,
+  onDiaMovido,
 }: {
   day: RoutineDayWithDetails;
   routine: ReturnType<typeof useRoutine>;
+  onDiaMovido: (diaSemana: number) => void;
 }) {
   const [addingExercise, setAddingExercise] = useState(false);
+  const [ocupado, setOcupado] = useState(false);
+  const { confirmar, dialogos } = useDialogos();
+  const copiables = entrenamientosParaCopiar(routine.days, day.dia_semana);
+
+  // Cambia este día de sitio con otro de la semana (el que estuviera allí pasa al nuestro).
+  async function moverA(destino: number) {
+    const c = describirIntercambio(routine.days, day.dia_semana, destino);
+    if (!c || ocupado) return;
+    if (!(await confirmar({ titulo: c.titulo, descripcion: c.descripcion, etiquetaOk: "Mover" }))) return;
+    setOcupado(true);
+    try {
+      await routine.intercambiarDias(day.dia_semana, destino);
+      onDiaMovido(destino);
+      toast.success(`Movido al ${DIAS_LABEL[destino].toLowerCase()}.`);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setOcupado(false);
+    }
+  }
+
+  // Pone en este día una copia del entrenamiento de otro día.
+  async function ponerOtro(origen: number) {
+    const c = describirSustitucion(routine.days, day.dia_semana, origen);
+    if (!c || ocupado) return;
+    if (!(await confirmar({ titulo: c.titulo, descripcion: c.descripcion, etiquetaOk: "Poner", destructivo: day.ejercicios.length > 0 }))) return;
+    setOcupado(true);
+    try {
+      await routine.sustituirEntrenamiento(day.dia_semana, origen);
+      toast.success("Entrenamiento cambiado.");
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setOcupado(false);
+    }
+  }
   const movilidad = day.habitos.find((h) => h.tipo === "movilidad");
   const caminata = day.habitos.find((h) => h.tipo === "caminata");
 
@@ -2356,6 +2398,64 @@ function DayEditor({
           </div>
         )}
       </section>
+
+      <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+        <p className="mb-1 flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-widest text-emerald-400">
+          <ArrowLeftRight className="h-3.5 w-3.5" /> Cambiar de día
+        </p>
+        <p className="mb-3 text-xs text-slate-400">
+          Mueve {day.es_dia_entreno ? `«${day.nombre_dia}»` : "este descanso"} a otro día de la semana: el día que estuviera ahí pasa al tuyo.
+          Se mueve completo, con sus ejercicios, hábitos e historial.
+        </p>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          {routine.days
+            .filter((d) => d.dia_semana !== day.dia_semana)
+            .map((d) => (
+              <button
+                key={d.id}
+                type="button"
+                disabled={ocupado}
+                onClick={() => moverA(d.dia_semana)}
+                className="rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-left transition hover:border-emerald-500 disabled:opacity-50"
+              >
+                <span className="block text-xs font-semibold text-white">{DIAS_LABEL[d.dia_semana]}</span>
+                <span className="block truncate text-[11px] text-slate-500">
+                  {d.es_dia_entreno ? d.nombre_dia : "Descanso"}
+                </span>
+              </button>
+            ))}
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+        <p className="mb-1 flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-widest text-emerald-400">
+          <Copy className="h-3.5 w-3.5" /> Poner otro entrenamiento
+        </p>
+        <p className="mb-3 text-xs text-slate-400">
+          Sustituye los ejercicios de este día por una copia de otro entrenamiento de tu rutina. El otro día no cambia y tu historial de series se conserva.
+        </p>
+        {copiables.length === 0 ? (
+          <p className="text-xs text-slate-500">No hay otros entrenamientos con ejercicios que copiar.</p>
+        ) : (
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {copiables.map((d) => (
+              <button
+                key={d.dia_semana}
+                type="button"
+                disabled={ocupado}
+                onClick={() => ponerOtro(d.dia_semana)}
+                className="rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-left transition hover:border-emerald-500 disabled:opacity-50"
+              >
+                <span className="block text-sm font-semibold text-white">{d.nombre_dia}</span>
+                <span className="block text-[11px] text-slate-500">
+                  {DIAS_LABEL[d.dia_semana]} · {d.ejercicios.length} {d.ejercicios.length === 1 ? "ejercicio" : "ejercicios"}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
+      {dialogos}
     </div>
   );
 }
