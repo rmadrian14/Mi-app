@@ -66,9 +66,24 @@ export function errorCalendario(e: unknown): Error {
   return new Error(m || "No se ha podido guardar el cambio.");
 }
 
+// Tareas sueltas sin hacer, de cualquier fecha.
+export async function leerPendientes(): Promise<EventoRow[]> {
+  const { data, error } = await supabase
+    .from("calendar_events")
+    .select(COLUMNAS)
+    .eq("tipo", "tarea")
+    .eq("hecho", false)
+    .is("repeticion", null)
+    .is("serie_id", null)
+    .order("inicio")
+    .limit(300);
+  if (error) throw errorCalendario(error);
+  return (data as unknown as FilaDb[]).map(aFila);
+}
+
 const filtroVentana = (r: Rango) => `repeticion.not.is.null,and(inicio.lt.${r.hasta}T00:00:00,fin.gte.${r.desde}T00:00:00)`;
 
-async function leerVentana(r: Rango): Promise<EventoRow[]> {
+export async function leerVentana(r: Rango): Promise<EventoRow[]> {
   const { data, error } = await leerTodo<FilaDb>((d, h) =>
     supabase.from("calendar_events").select(COLUMNAS).or(filtroVentana(r)).order("inicio").order("id").range(d, h) as unknown as PromiseLike<{ data: FilaDb[] | null; error: { message: string } | null }>,
   );
@@ -83,23 +98,7 @@ export function useAlmacenSupabase(rango: Rango): AlmacenCalendario | null {
 
   const eventos = useQuery({ queryKey: clave, enabled: !!user, placeholderData: keepPreviousData, queryFn: () => leerVentana(rango) });
 
-  const pendientes = useQuery({
-    queryKey: ["calendar_tareas_pendientes", user?.id],
-    enabled: !!user,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("calendar_events")
-        .select(COLUMNAS)
-        .eq("tipo", "tarea")
-        .eq("hecho", false)
-        .is("repeticion", null)
-        .is("serie_id", null)
-        .order("inicio")
-        .limit(300);
-      if (error) throw errorCalendario(error);
-      return (data as unknown as FilaDb[]).map(aFila);
-    },
-  });
+  const pendientes = useQuery({ queryKey: ["calendar_tareas_pendientes", user?.id], enabled: !!user, queryFn: leerPendientes });
 
   const aplicar = useCallback(
     async (plan: Plan) => {
