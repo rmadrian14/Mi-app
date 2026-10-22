@@ -35,6 +35,7 @@ import { PLATOS_CON_TAMANO } from "@/lib/food-recetas";
 import { hoyISO } from "@/lib/weight-trend";
 import { Aviso, Card, Field, MacroBar, MacroPills, SectionTitle, btnGhost, btnPrimary, btnSecondary, fmt, inputCls } from "./common";
 import { useDialogos } from "./dialogs";
+import { QueComoCard } from "./que-como-card";
 import { aGenFood } from "./menu-view";
 
 type Log = ReturnType<typeof useFoodLog>;
@@ -546,6 +547,10 @@ export function DiarioContenido({
               : `Te has pasado ${fmt(-falta.kcal)} kcal del objetivo.`}
         </p>
       </Card>
+
+      {fecha >= hoy && (
+        <QueComoCard fecha={fecha} profile={profile} foods={foods} restante={falta} entradas={log.entradas} onAnadir={async (es) => { await log.anadir(es); }} />
+      )}
 
       {comidasMostradas.map((comida) => {
         const entradas = log.entradas.filter((e) => e.comida === comida);

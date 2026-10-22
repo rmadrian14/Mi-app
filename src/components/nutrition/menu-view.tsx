@@ -22,6 +22,7 @@ import {
   redondearRacion,
   type GenFood,
 } from "@/lib/nutrition-generator";
+import { desfaseDelMenu, diaMontado } from "@/lib/menu-desfase";
 import { Aviso, Card, MacroBar, MacroPills, btnGhost, btnPrimary, btnSecondary, fmt, inputCls } from "./common";
 import { useDialogos } from "./dialogs";
 
@@ -261,6 +262,16 @@ export function MenuView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [menus.porDia, foodsPorId]);
 
+  // ¿Sigue el menú encajando con tus calorías? (el objetivo pudo cambiar después de generarlo)
+  const desfase = useMemo(() => {
+    const montados = [0, 1, 2, 3, 4, 5, 6].filter((d) => diaMontado(menus.porDia.get(d) ?? []));
+    return desfaseDelMenu(
+      montados.map((d) => totalDia(d).kcal),
+      target.kcal,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [menus.porDia, foodsPorId, target.kcal]);
+
   async function ejecutar(clave: string, fn: () => Promise<void>) {
     setOcupado(clave);
     try {
@@ -380,6 +391,32 @@ export function MenuView({
       else toast.success(cambios.length ? "Raciones ajustadas al objetivo." : "Las raciones ya cuadran.");
     });
 
+  // Reajusta las raciones de todos los días montados a tus calorías y macros de ahora, sin cambiar los alimentos.
+  const ajustarSemana = () =>
+    ejecutar("ajuste-semana", async () => {
+      const cambios: { id: string; gramos: number }[] = [];
+      let sinCuadrar = 0;
+      for (let d = 0; d < 7; d++) {
+        const items = menus.porDia.get(d) ?? [];
+        if (!diaMontado(items)) continue;
+        const lista = items
+          .map((i) => ({ item: i, food: genPorId.get(i.food_id) }))
+          .filter((x): x is { item: (typeof items)[number]; food: GenFood } => !!x.food);
+        if (!lista.length) continue;
+        const r = ajustarRaciones(
+          lista.map((x) => ({ comida: x.item.comida, food: x.food, gramos: x.item.gramos })),
+          target,
+        );
+        if (r.error > 0.1) sinCuadrar++;
+        lista.forEach((x, k) => {
+          if (r.gramos[k] !== x.item.gramos) cambios.push({ id: x.item.id, gramos: r.gramos[k] });
+        });
+      }
+      if (cambios.length) await menus.actualizarVarios(cambios);
+      if (sinCuadrar > 0) toast.warning(`Raciones ajustadas, pero ${sinCuadrar} ${sinCuadrar === 1 ? "día no llega" : "días no llegan"} del todo al objetivo con esos alimentos. Prueba a generar un menú nuevo.`);
+      else toast.success("Raciones de la semana ajustadas a tu objetivo.");
+    });
+
   async function vaciarDia() {
     if (!itemsDia.length) return;
     const si = await confirmar({
@@ -469,6 +506,24 @@ export function MenuView({
   return (
     <div className="space-y-4">
       {dialogos}
+      {desfase && (
+        <Card className="space-y-3 !border-amber-500/30 !bg-amber-500/5">
+          <p className="text-sm font-semibold text-amber-200">Este menú ya no encaja con tu objetivo</p>
+          <p className="text-xs text-slate-400">
+            Aporta de media {fmt(desfase.kcalMenu)} kcal al día y tu objetivo es {fmt(desfase.kcalObjetivo)} ({desfase.diferenciaPct > 0 ? "+" : ""}
+            {desfase.diferenciaPct} %). Seguramente cambiaste de objetivo después de generarlo. Puedo reajustar las raciones de toda la semana sin cambiar los
+            alimentos, o generarte un menú nuevo.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={ajustarSemana} disabled={!!ocupado} className={btnPrimary}>
+              {ocupado === "ajuste-semana" ? "Ajustando…" : "Ajustar las raciones de la semana"}
+            </button>
+            <button type="button" onClick={generarSemana} disabled={!!ocupado} className={btnSecondary}>
+              Generar un menú nuevo
+            </button>
+          </div>
+        </Card>
+      )}
       <Card className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
           <select
