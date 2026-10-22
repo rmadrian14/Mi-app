@@ -12,6 +12,7 @@ import {
 import appCss from "../styles.css?url";
 import { Toaster } from "sonner";
 import { AppSidebar } from "@/components/app-sidebar";
+import { mostrarBarraDeNegocio } from "@/lib/rutas";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { ThemeProvider } from "@/hooks/use-theme";
 import { BookOpenCheck, FolderKanban, Radar } from "lucide-react";
@@ -136,15 +137,9 @@ function RootComponent() {
   );
 }
 
-// Rutas "personales" sin menú lateral: el selector de módulos y los módulos
-// aún en construcción. El resto (todo lo que hoy es "Negocio") sí lo muestra.
-const NO_SIDEBAR_PATHS = ["/", "/auth", "/invite", "/training", "/planning", "/nutrition"];
-
 function AppShell() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const showSidebar = !NO_SIDEBAR_PATHS.some((p) =>
-    p === "/" ? pathname === "/" : pathname.startsWith(p),
-  );
+  const showSidebar = mostrarBarraDeNegocio(pathname);
   return (
     <SidebarProvider>
       <div className="flex w-full min-h-screen bg-slate-950">

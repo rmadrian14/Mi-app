@@ -22,9 +22,9 @@ const MODULES = [
     image: entrenamientoIcon,
   },
   {
-    to: "/planning",
-    title: "Planificación",
-    description: "Organiza tu agenda y tus tareas del día a día.",
+    to: "/organization",
+    title: "Organización",
+    description: "Tu calendario de eventos y tareas, con repeticiones y avisos.",
     image: planificacionIcon,
   },
   {

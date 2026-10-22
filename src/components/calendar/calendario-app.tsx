@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Bell, ChevronLeft, ChevronRight, HelpCircle, Menu, Plus } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import { Bell, ChevronLeft, ChevronRight, HelpCircle, Home, Menu, Plus } from "lucide-react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { cn } from "@/lib/utils";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
@@ -351,7 +352,11 @@ export function CalendarioApp({ useAlmacen, useExternos, capasExternas }: Props)
         <button type="button" onClick={() => setLateralMovil(true)} className={cn(btnIcono, "lg:hidden")} aria-label="Abrir panel lateral">
           <Menu className="h-5 w-5" />
         </button>
-        <h1 className="mr-2 hidden text-lg font-semibold text-white 2xl:block">Organización</h1>
+        <Link to="/" title="Volver a inicio" className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-sm font-semibold text-slate-300 transition hover:bg-slate-800 hover:text-white">
+          <Home className="h-4 w-4" />
+          <span className="hidden sm:inline">Inicio</span>
+        </Link>
+        <h1 className="mr-2 hidden text-lg font-semibold text-white lg:block">Organización</h1>
         <button type="button" onClick={() => setFecha(hoy)} className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm font-semibold text-slate-200 transition hover:bg-slate-800">
           Hoy
         </button>

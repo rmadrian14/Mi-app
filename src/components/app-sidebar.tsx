@@ -7,7 +7,6 @@ import {
   Radar,
   LogOut,
   Briefcase,
-  CalendarDays,
   Settings,
   PanelLeftClose,
   PanelLeftOpen,
@@ -31,7 +30,6 @@ const sections: { label: string; items: { title: string; url: string; icon: type
     items: [
       { title: "Gestión de Proyectos", url: "/projects", icon: FolderKanban },
       { title: "Contabilidad", url: "/accounting", icon: BookOpenCheck },
-      { title: "Organización", url: "/organization", icon: CalendarDays },
       { title: "Radar Autónomo", url: "/radar", icon: Radar },
       { title: "Ajustes", url: "/settings", icon: Settings },
     ],
