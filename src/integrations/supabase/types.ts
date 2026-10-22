@@ -14,6 +14,80 @@ export type Database = {
   }
   public: {
     Tables: {
+      calendar_events: {
+        Row: {
+          color: string
+          created_at: string
+          descripcion: string | null
+          fin: string
+          hecho: boolean
+          id: string
+          inicio: string
+          omitidas: string[]
+          prioridad: string | null
+          recordatorio_min: number | null
+          repeticion: Json | null
+          serie_id: string | null
+          serie_original: string | null
+          tipo: string
+          titulo: string
+          todo_el_dia: boolean
+          ubicacion: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          color?: string
+          created_at?: string
+          descripcion?: string | null
+          fin: string
+          hecho?: boolean
+          id?: string
+          inicio: string
+          omitidas?: string[]
+          prioridad?: string | null
+          recordatorio_min?: number | null
+          repeticion?: Json | null
+          serie_id?: string | null
+          serie_original?: string | null
+          tipo?: string
+          titulo: string
+          todo_el_dia?: boolean
+          ubicacion?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          color?: string
+          created_at?: string
+          descripcion?: string | null
+          fin?: string
+          hecho?: boolean
+          id?: string
+          inicio?: string
+          omitidas?: string[]
+          prioridad?: string | null
+          recordatorio_min?: number | null
+          repeticion?: Json | null
+          serie_id?: string | null
+          serie_original?: string | null
+          tipo?: string
+          titulo?: string
+          todo_el_dia?: boolean
+          ubicacion?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "calendar_events_serie_id_fkey"
+            columns: ["serie_id"]
+            isOneToOne: false
+            referencedRelation: "calendar_events"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       clients: {
         Row: {
           address: string
