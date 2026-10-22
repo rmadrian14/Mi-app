@@ -71,6 +71,21 @@ describe("biblioteca de alimentos (semilla)", () => {
     }
   });
 
+  it("incluye el secreto de cerdo, más graso que el lomo y menos que la panceta, y el ibérico aún más graso", () => {
+    const f = (n: string) => SEED_FOODS.find((s) => s.nombre.startsWith(n))!;
+    const secreto = f("Secreto de cerdo");
+    const iberico = f("Secreto ibérico");
+    expect(secreto.contiene).toEqual(expect.arrayContaining(["carne", "cerdo"]));
+    expect(iberico.contiene).toEqual(expect.arrayContaining(["carne", "cerdo"]));
+    expect(secreto.grasa_100).toBeGreaterThan(f("Lomo de cerdo (crudo)").grasa_100);
+    expect(secreto.grasa_100).toBeLessThan(f("Panceta de cerdo fresca").grasa_100);
+    expect(iberico.grasa_100).toBeGreaterThan(secreto.grasa_100);
+    expect(iberico.kcal_100).toBeGreaterThan(secreto.kcal_100);
+    expect(secreto.comidas).toEqual(expect.arrayContaining(["comida", "cena"]));
+    // a quien evita el cerdo no se le propone
+    for (const s of [secreto, iberico]) expect(alimentoPermitido({ ...s, id: "x" } as never, ["sin_cerdo"], null)).toBe(false);
+  });
+
   it("las calorías declaradas cuadran con 4P + 4H + 9G (±15 % o ±25 kcal)", () => {
     for (const s of SEED_FOODS) {
       const atwater = 4 * s.proteina_100 + 4 * s.hidratos_100 + 9 * s.grasa_100 + 7 * (s.alcohol_100 ?? 0);
