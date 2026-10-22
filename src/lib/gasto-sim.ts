@@ -29,6 +29,8 @@ export type Escenario = {
   aMedias: number; // probabilidad de que se apunte solo una parte del día
   ruidoPeso: number; // kg de ruido de agua en cada pesada
   frecuenciaPesada: number; // probabilidad de pesarse cada día
+  pesadaCada?: number; // si se indica, una pesada cada tantos días (con ±1 día de margen) en vez de al azar
+  sesgoBascula?: number; // kg de diferencia entre básculas distintas (gimnasio, farmacia, casa de alguien…)
   adherencia: [number, number]; // lo que comes / lo que te marca el plan
   adherenciaVariable: boolean; // la adherencia cambia con las semanas y hay semanas libres
   deficit: number; // kcal/día por debajo de la ecuación que marca el plan (0 = mantener)
@@ -94,6 +96,8 @@ export function simularUsuario(r: Rng, e: Escenario, ndias: number, politica?: P
   let sinRegistrarAyer = false;
   let derivaAdh = 0;
   let libres = 0;
+  const basculas = [0, r.normal() * (e.sesgoBascula ?? 0), r.normal() * (e.sesgoBascula ?? 0)];
+  let proxima = e.pesadaCada ? Math.floor(r.unif() * e.pesadaCada) : 0;
   const dias: DiaSim[] = [];
   const parcial = { prior, gasto0, peso0, sesgo, rhoReal, adherencia, plan, dias } as Usuario;
   for (let t = 0; t < ndias; t++) {
@@ -121,8 +125,13 @@ export function simularUsuario(r: Rng, e: Escenario, ndias: number, politica?: P
     agua = 0.5 * agua + r.normal() * e.ruidoPeso * Math.sqrt(1 - 0.25);
     if (e.cambiosDeAgua && r.unif() < 0.02) saltoAgua += (r.unif() < 0.5 ? -1 : 1) * r.entre(0.6, 1.3);
     saltoAgua *= 0.93;
-    const pesa = r.unif() < e.frecuenciaPesada;
-    dias.push({ peso: pesa ? W + agua + saltoAgua : null, registrada, completa: completaFinal, real, gastoReal: gasto, pesoReal: W, planDia: plan });
+    let pesa: boolean;
+    if (e.pesadaCada) {
+      pesa = t >= proxima;
+      if (pesa) proxima = t + Math.max(1, Math.round(e.pesadaCada + r.entre(-1, 1)));
+    } else pesa = r.unif() < e.frecuenciaPesada;
+    const bascula = basculas[r.unif() < 0.7 ? 0 : 1 + Math.floor(r.unif() * 2)];
+    dias.push({ peso: pesa ? W + agua + saltoAgua + bascula : null, registrada, completa: completaFinal, real, gastoReal: gasto, pesoReal: W, planDia: plan });
     W += (real - gasto) / rhoReal;
     adaptacion += (-0.0025 * (gasto - real) - adaptacion * 0.02) * 1; // adaptación lenta al déficit
   }

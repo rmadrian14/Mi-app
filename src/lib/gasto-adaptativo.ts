@@ -28,7 +28,8 @@ export type DiaGasto = {
 export type OpcionesGasto = {
   rho: number; // kcal por kg de peso que cambia
   sigmaPrior: number; // incertidumbre de la ecuación (kcal/día)
-  sigmaPeso: number; // ruido de una pesada (kg): agua, digestión, ropa
+  sigmaPeso: number; // ruido de una pesada (kg) pesándose casi a diario: agua, digestión, ropa
+  sigmaPesoEspaciado: number; // ídem pesándose cada semana o menos: otra hora, otra báscula, otra ropa
   sigmaIngesta: number; // error de un día registrado (kcal)
   sigmaSinDato: number; // error de un día sin registrar (kcal)
   qGasto: number; // cuánto puede cambiar el gasto de un día para otro (kcal)
@@ -41,6 +42,7 @@ export const OPCIONES_GASTO: OpcionesGasto = {
   rho: KCAL_POR_KG,
   sigmaPrior: 320,
   sigmaPeso: 0.8,
+  sigmaPesoEspaciado: 1.2,
   sigmaIngesta: 250,
   sigmaSinDato: 800,
   qGasto: 6,
@@ -60,6 +62,7 @@ export type EstimacionGasto = {
   kgSemana: number | null; // ritmo de cambio del peso en las últimas 2 semanas
   diasConPeso: number;
   diasConIngesta: number;
+  espaciadoPesadas: number | null; // días medios entre pesadas (null si hay menos de dos)
   pesoDelPrior: number; // 0-1: cuánto de la estimación sigue siendo la ecuación
 };
 
@@ -73,6 +76,20 @@ export function confianzaDe(desviacion: number, diasConPeso: number): Confianza 
 
 type Cov = { tt: number; te: number; ee: number };
 
+// Días medios entre pesadas.
+export function espaciadoDePesadas(dias: DiaGasto[]): number | null {
+  const idx = dias.map((d, i) => (d.peso != null ? i : -1)).filter((i) => i >= 0);
+  return idx.length >= 2 ? (idx[idx.length - 1] - idx[0]) / (idx.length - 1) : null;
+}
+
+// Una pesada de vez en cuando se hace en peores condiciones (otra báscula, otra hora): su ruido es mayor.
+// Hasta 3 días entre pesadas vale el ruido normal; desde 6, el espaciado; entre medias, se interpola.
+export function ruidoDePesada(o: OpcionesGasto, espaciado: number | null): number {
+  if (espaciado == null || espaciado <= 3) return o.sigmaPeso;
+  if (espaciado >= 6) return o.sigmaPesoEspaciado;
+  return o.sigmaPeso + ((espaciado - 3) / 3) * (o.sigmaPesoEspaciado - o.sigmaPeso);
+}
+
 export function estimarGasto(p: {
   prior: number; // gasto que da la ecuación
   dias: DiaGasto[]; // seguidos y en orden, hasta ayer o hoy
@@ -83,6 +100,8 @@ export function estimarGasto(p: {
   const dias = p.dias;
   const diasConPeso = dias.filter((d) => d.peso != null).length;
   const diasConIngesta = dias.filter((d) => d.kcal != null).length;
+  const espaciadoPesadas = espaciadoDePesadas(dias);
+  const sigmaPeso = p.opciones?.sigmaPeso !== undefined ? o.sigmaPeso : ruidoDePesada(o, espaciadoPesadas);
   const i0 = dias.findIndex((d) => d.peso != null);
   const vacio: EstimacionGasto = {
     gasto: Math.round(p.prior),
@@ -93,13 +112,14 @@ export function estimarGasto(p: {
     kgSemana: null,
     diasConPeso,
     diasConIngesta,
+    espaciadoPesadas,
     pesoDelPrior: 1,
   };
   if (i0 < 0) return vacio;
 
   let T = dias[i0].peso as number;
   let E = p.prior;
-  let P: Cov = { tt: o.sigmaPeso ** 2, te: 0, ee: o.sigmaPrior ** 2 };
+  let P: Cov = { tt: sigmaPeso ** 2, te: 0, ee: o.sigmaPrior ** 2 };
   const recientes: number[] = []; // ingestas registradas, para rellenar los huecos
   const r2 = o.rho * o.rho;
   const a = o.gastoPorKg / o.rho;
@@ -130,7 +150,7 @@ export function estimarGasto(p: {
     }
     const w = dias[i].peso;
     if (w != null) {
-      let R = o.sigmaPeso ** 2;
+      let R = sigmaPeso ** 2;
       const y = w - T;
       const z = Math.abs(y) / Math.sqrt(P.tt + R);
       if (z > o.umbralAtipico) R *= (z / o.umbralAtipico) ** 2;
@@ -155,6 +175,7 @@ export function estimarGasto(p: {
     kgSemana,
     diasConPeso,
     diasConIngesta,
+    espaciadoPesadas,
     pesoDelPrior: Math.min(1, (desviacion / o.sigmaPrior) ** 2),
   };
 }

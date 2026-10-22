@@ -14,8 +14,10 @@ import { useDialogos } from "./dialogs";
 const fechaCorta = (f: string) => `${f.slice(8, 10)}/${f.slice(5, 7)}`;
 // Un ajuste nunca mueve las calorías más que esto de golpe (kcal/día).
 const AJUSTE_MAX = 200;
-// Por debajo de este cambio no se propone nada: es ruido.
+// Por debajo de este cambio no se propone nada: es ruido. Con poca confianza hace falta un cambio mayor.
 const AJUSTE_MIN = 50;
+const AJUSTE_MIN_CONFIANZA_BAJA = 100;
+const ajusteMinimo = (c: Confianza) => (c === "baja" ? AJUSTE_MIN_CONFIANZA_BAJA : AJUSTE_MIN);
 
 const CONFIANZA: Record<Confianza, { texto: string; clase: string }> = {
   ninguna: { texto: "Aún sin datos", clase: "bg-slate-800 text-slate-300" },
@@ -141,7 +143,7 @@ export function PesoView({
   }
 
   async function aplicar() {
-    if (!estimacion || !propuesta || estimacion.confianza === "ninguna" || Math.abs(propuesta.delta) < AJUSTE_MIN) return;
+    if (!estimacion || !propuesta || estimacion.confianza === "ninguna" || Math.abs(propuesta.delta) < ajusteMinimo(estimacion.confianza)) return;
     const si = await confirmar({
       titulo: `¿Pasar a ${fmt(propuesta.kcalNueva)} kcal?`,
       descripcion: `${propuesta.delta > 0 ? "+" : ""}${fmt(propuesta.delta)} kcal al día; la diferencia se reparte en los hidratos (la proteína y la grasa se quedan igual). Tu mantenimiento pasará a ${fmt(estimacion.gasto)} kcal.`,
@@ -264,8 +266,10 @@ export function PesoView({
           {estimacion.confianza === "ninguna" ? (
             <div className="mt-3">
               <Aviso tono="gris">
-                Todavía se usa la estimación por fórmula: hacen falta unas 2-3 semanas de pesadas y de diario para medir tu gasto de verdad. Pésate cada
-                mañana en ayunas y apunta todo lo que comes cada día; los días a medias no cuentan.
+                Todavía se usa la estimación por fórmula. Para medir tu gasto de verdad hacen falta pesadas y diario durante unas{" "}
+                {estimacion.espaciadoPesadas != null && estimacion.espaciadoPesadas <= 3 ? "3-4 semanas" : "6-8 semanas pesándote cada una o dos semanas (3-4 si te pesas a diario)"}.
+                Pésate siempre en la misma báscula y a la misma hora (mejor por la mañana, tras ir al baño) y apunta todo lo que comes cada día; los
+                días a medias no cuentan.
               </Aviso>
             </div>
           ) : (
@@ -277,7 +281,7 @@ export function PesoView({
                     {fmt(estimacion.kgSemana, 2)} kg por semana.
                   </p>
                 )}
-                {Math.abs(propuesta.delta) >= AJUSTE_MIN ? (
+                {Math.abs(propuesta.delta) >= ajusteMinimo(estimacion.confianza) ? (
                   <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3">
                     <p className="text-sm font-semibold text-emerald-200">
                       Sugerencia: {propuesta.delta > 0 ? "subir" : "bajar"} a {fmt(propuesta.kcalNueva)} kcal ({propuesta.delta > 0 ? "+" : ""}
@@ -293,6 +297,11 @@ export function PesoView({
                   </div>
                 ) : (
                   <p className="text-sm text-emerald-200">Tus {fmt(profile.kcal_objetivo)} kcal encajan con tu gasto real. No hace falta cambiar nada.</p>
+                )}
+                {estimacion.confianza === "baja" && (
+                  <p className="text-xs text-slate-500">
+                    Es una primera idea: con pocas pesadas el margen es amplio. Se afina con cada pesada; cambia las calorías solo si la diferencia es clara.
+                  </p>
                 )}
                 {propuesta.avisos.map((a) => (
                   <Aviso key={a}>{a}</Aviso>

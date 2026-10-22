@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { sumarDias } from "./calendar";
-import { armarDias, confianzaDe, estimarGasto, ingestasCompletas, OPCIONES_GASTO, type DiaGasto } from "./gasto-adaptativo";
+import { armarDias, confianzaDe, espaciadoDePesadas, estimarGasto, ingestasCompletas, OPCIONES_GASTO, ruidoDePesada, type DiaGasto } from "./gasto-adaptativo";
 import { BASE, diasHasta, estimadorEcuacion, estimadorKalman, estimadorPlan, evaluar, gastoReferencia, rng, simularUsuario, type Escenario, type Politica } from "./gasto-sim";
 import { calcularObjetivos } from "./nutrition";
 import { sugerirAjuste } from "./weight-trend";
@@ -97,6 +97,35 @@ describe("estimar el gasto real", () => {
   });
 });
 
+describe("pesadas espaciadas (sin báscula en casa)", () => {
+  it("mide cada cuántos días te pesas", () => {
+    expect(espaciadoDePesadas(dias(30, { gasto: 2500, ingesta: 2500 }))).toBe(1);
+    expect(espaciadoDePesadas(dias(29, { gasto: 2500, ingesta: 2500, sinPeso: (i) => i % 7 !== 0 }))).toBe(7);
+    expect(espaciadoDePesadas(dias(1, { gasto: 2500, ingesta: 2500 }))).toBeNull();
+  });
+
+  it("cuanto más espaciadas, más ruido se le supone a cada pesada", () => {
+    expect(ruidoDePesada(OPCIONES_GASTO, null)).toBe(OPCIONES_GASTO.sigmaPeso);
+    expect(ruidoDePesada(OPCIONES_GASTO, 1)).toBe(OPCIONES_GASTO.sigmaPeso);
+    expect(ruidoDePesada(OPCIONES_GASTO, 3)).toBe(OPCIONES_GASTO.sigmaPeso);
+    expect(ruidoDePesada(OPCIONES_GASTO, 7)).toBe(OPCIONES_GASTO.sigmaPesoEspaciado);
+    expect(ruidoDePesada(OPCIONES_GASTO, 14)).toBe(OPCIONES_GASTO.sigmaPesoEspaciado);
+    const medio = ruidoDePesada(OPCIONES_GASTO, 4.5);
+    expect(medio).toBeGreaterThan(OPCIONES_GASTO.sigmaPeso);
+    expect(medio).toBeLessThan(OPCIONES_GASTO.sigmaPesoEspaciado);
+  });
+
+  it("pesándote una vez por semana también se llega al gasto real, solo que más despacio", () => {
+    const semanal = (n: number) => estimarGasto({ prior: 3000, dias: dias(n, { gasto: 2500, ingesta: 2500, sinPeso: (i) => i % 7 !== 0 }) });
+    const diaria = estimarGasto({ prior: 3000, dias: dias(56, { gasto: 2500, ingesta: 2500 }) });
+    expect(semanal(84).espaciadoPesadas).toBe(7);
+    expect(semanal(84).desviacion).toBeLessThan(semanal(28).desviacion);
+    expect(semanal(56).desviacion).toBeGreaterThan(diaria.desviacion);
+    expect(Math.abs(semanal(84).gasto - 2500)).toBeLessThan(180);
+    expect(semanal(84).gasto).toBeLessThan(2750);
+  });
+});
+
 describe("datos del diario", () => {
   const hoy = "2026-10-22";
   it("el día de hoy y los días a medias no cuentan", () => {
@@ -189,6 +218,37 @@ describe("estudio con personas simuladas", () => {
       const q = MAE(e, estimadorEcuacion, [56]).get(56)!.mae;
       expect(k, e.nombre).toBeLessThan(q * 0.85);
     }
+  });
+
+  it("pesándote una vez por semana (misma báscula) a las 8-12 semanas ya mejora mucho a la fórmula", () => {
+    const e: Escenario = { ...BASE, nombre: "semanal", pesadaCada: 7, ruidoPeso: 0.6 };
+    const k = MAE(e, kalman, [56, 84]);
+    const q = MAE(e, estimadorEcuacion, [56, 84]);
+    expect(k.get(56)!.mae).toBeLessThan(q.get(56)!.mae * 0.5);
+    expect(k.get(84)!.mae).toBeLessThan(q.get(84)!.mae * 0.35);
+  });
+
+  it("con una pesada cada 2 semanas y básculas distintas no hace daño y a las 12 semanas ya ayuda", () => {
+    const e: Escenario = { ...BASE, nombre: "quincenal", pesadaCada: 14, ruidoPeso: 1.0, sesgoBascula: 0.8 };
+    const k = MAE(e, kalman, [28, 84]);
+    const q = MAE(e, estimadorEcuacion, [28, 84]);
+    expect(k.get(28)!.mae).toBeLessThanOrEqual(q.get(28)!.mae * 1.05);
+    expect(k.get(84)!.mae).toBeLessThan(q.get(84)!.mae * 0.6);
+  });
+
+  it("y el intervalo no engaña ni con pesadas escasas y básculas distintas", () => {
+    const e: Escenario = { ...BASE, nombre: "quincenal", pesadaCada: 14, ruidoPeso: 1.0, sesgoBascula: 0.8 };
+    const r = rng(8);
+    let dentro = 0;
+    const n = 250;
+    for (let i = 0; i < n; i++) {
+      const u = simularUsuario(r, e, 84);
+      const est = estimarGasto({ prior: u.prior, dias: diasHasta(u, 84), objetivo: u.plan });
+      const ref = gastoReferencia(u, 84, "diario");
+      if (ref >= est.intervalo[0] && ref <= est.intervalo[1]) dentro++;
+    }
+    expect(dentro / n).toBeGreaterThan(0.68);
+    expect(dentro / n).toBeLessThan(0.97);
   });
 
   it("la incertidumbre está bien calibrada: el intervalo del 80 % acierta entre el 60 y el 95 %", () => {
