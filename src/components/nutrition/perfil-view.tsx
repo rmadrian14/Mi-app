@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import type { PersonalProfile } from "@/hooks/use-training";
 import type { NutritionProfile, NutritionProfileInput } from "@/hooks/use-nutrition";
-import type { Sexo } from "@/lib/nutrition";
+import { incoherenciaObjetivo, type Sexo } from "@/lib/nutrition";
 import { Aviso, Card, Field, SectionTitle, btnPrimary, btnSecondary, fmt, inputCls } from "./common";
 import {
   ActividadCampos,
@@ -16,6 +16,9 @@ import {
   validarDatosCorporales,
   type DatosCuestionario,
 } from "./objetivos-campos";
+
+// Lo que cambia las calorías y los macros; el resto del cuestionario (restricciones, comidas…) no.
+const AFECTA_AL_CALCULO: (keyof DatosCuestionario)[] = ["sexo", "edad", "peso", "altura", "nivel", "diasEntreno", "objetivo", "ritmo", "kcalMantenimiento"];
 
 export function PerfilView({
   profile,
@@ -52,9 +55,20 @@ export function PerfilView({
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const set = (patch: Partial<DatosCuestionario>) => {
-    setD((prev) => ({ ...prev, ...patch }));
-    setCuestionarioCambiado(true);
+  // Con objetivos sin editar a mano, cambiar algo que afecta al cálculo los recalcula solos.
+  const set =(patch: Partial<DatosCuestionario>) => {
+    const nuevo = { ...d, ...patch };
+    setD(nuevo);
+    const r = !editado && (Object.keys(patch) as (keyof DatosCuestionario)[]).some((k) => AFECTA_AL_CALCULO.includes(k)) ? calcularDesdeDatos(nuevo) : null;
+    if (r) {
+      setKcal(String(r.kcal));
+      setProt(String(r.proteina_g));
+      setGras(String(r.grasa_g));
+      setHidr(String(r.hidratos_g));
+      setCuestionarioCambiado(false);
+    } else {
+      setCuestionarioCambiado(true);
+    }
   };
 
   const calculado = useMemo(() => calcularDesdeDatos(d), [d]);
@@ -63,6 +77,9 @@ export function PerfilView({
   const kcalNum = parseInt(kcal, 10) || 0;
   const kcalMacros = 4 * (parseInt(prot, 10) || 0) + 9 * (parseInt(gras, 10) || 0) + 4 * (parseInt(hidr, 10) || 0);
   const descuadre = kcalNum > 0 ? Math.abs(kcalMacros - kcalNum) / kcalNum : 0;
+  const incoherencia = calculado ? incoherenciaObjetivo(d.objetivo, kcalNum, calculado.tdee) : null;
+  // Objetivos sin editar a mano que ya no salen de las respuestas actuales (p. ej. se cambió el objetivo hace tiempo)
+  const desfasado = !!calculado && !editado && kcalNum > 0 && Math.abs(kcalNum - calculado.kcal) / calculado.kcal > 0.03;
 
   function recalcular() {
     if (!calculado) {
@@ -192,6 +209,25 @@ export function PerfilView({
           <div className="mt-3">
             <Aviso tono="gris">
               Has cambiado respuestas del cuestionario. Pulsa «Recalcular» si quieres que se actualicen tus objetivos.
+            </Aviso>
+          </div>
+        )}
+        {incoherencia && calculado && (
+          <div className="mt-3">
+            <Aviso>
+              {incoherencia === "sin_deficit"
+                ? `Tus ${fmt(kcalNum)} kcal están al nivel de tu gasto estimado (${fmt(calculado.tdee)} kcal): con eso no perderías grasa.`
+                : `Tus ${fmt(kcalNum)} kcal no superan tu gasto estimado (${fmt(calculado.tdee)} kcal): con eso no ganarías músculo.`}{" "}
+              {desfasado || editado
+                ? `Para este objetivo la calculadora da ${fmt(calculado.kcal)} kcal. Pulsa «Recalcular» y luego «Guardar» para aplicarlo.`
+                : null}
+            </Aviso>
+          </div>
+        )}
+        {desfasado && !incoherencia && calculado && (
+          <div className="mt-3">
+            <Aviso tono="gris">
+              Con tus datos y tu objetivo la calculadora da {fmt(calculado.kcal)} kcal, pero tienes {fmt(kcalNum)}. Pulsa «Recalcular» y luego «Guardar» si quieres actualizarlo.
             </Aviso>
           </div>
         )}

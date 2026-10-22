@@ -169,6 +169,17 @@ export function calcularObjetivos(i: InputObjetivos): ResultadoObjetivos {
   };
 }
 
+// ¿Las calorías guardadas encajan con el objetivo? Se compara con el gasto total estimado: para
+// perder grasa tienen que quedar por debajo y para ganar músculo por encima.
+export type IncoherenciaObjetivo = "sin_deficit" | "sin_superavit";
+
+export function incoherenciaObjetivo(objetivo: ObjetivoNutricional, kcal: number, tdee: number): IncoherenciaObjetivo | null {
+  if (!(kcal > 0) || !(tdee > 0)) return null;
+  if (objetivo === "perder_grasa" && kcal > tdee * 0.95) return "sin_deficit";
+  if (objetivo === "ganar_musculo" && kcal < tdee * 1.03) return "sin_superavit";
+  return null;
+}
+
 /* ------------------------------ Alimentos y macros ------------------------------ */
 
 export type CategoriaAlimento =

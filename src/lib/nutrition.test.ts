@@ -5,6 +5,7 @@ import {
   calcularPal,
   comidasDelDia,
   equivalenteCocinado,
+  incoherenciaObjetivo,
   macrosDe,
   mifflinStJeor,
   repartoCalorias,
@@ -119,6 +120,22 @@ describe("objetivos nutricionales", () => {
   it("la grasa nunca baja de 0,6 g/kg", () => {
     const r = calcularObjetivos({ ...base, objetivo: "perder_grasa", sexo: "mujer", pesoKg: 90, alturaCm: 160, nivelActividad: "sedentario", diasEntreno: 0 });
     expect(r.grasa_g).toBeGreaterThanOrEqual(Math.round(90 * 0.6) - 1);
+  });
+
+  it("detecta calorías guardadas que no encajan con el objetivo", () => {
+    // Caso real: hombre de 85 kg, 183 cm, 21 años, nivel ligero y 3 días → gasto ≈ 3065 kcal
+    expect(incoherenciaObjetivo("perder_grasa", 3050, 3065)).toBe("sin_deficit");
+    expect(incoherenciaObjetivo("perder_grasa", 2600, 3065)).toBeNull();
+    expect(incoherenciaObjetivo("ganar_musculo", 3065, 3065)).toBe("sin_superavit");
+    expect(incoherenciaObjetivo("ganar_musculo", 3350, 3065)).toBeNull();
+    expect(incoherenciaObjetivo("mantener", 3050, 3065)).toBeNull();
+    expect(incoherenciaObjetivo("recomposicion", 3050, 3065)).toBeNull();
+    expect(incoherenciaObjetivo("perder_grasa", 0, 3065)).toBeNull();
+  });
+
+  it("lo que calcula la propia app para perder grasa siempre queda en déficit", () => {
+    const r = calcularObjetivos({ ...base, objetivo: "perder_grasa", ritmo: "suave" });
+    expect(incoherenciaObjetivo("perder_grasa", r.kcal, r.tdee)).toBeNull();
   });
 });
 
