@@ -24,12 +24,14 @@ import {
   recientes as calcularRecientes,
   restante,
   sumarDias,
+  TAMANOS,
   totalesDelDia,
   unidadesDesdeGramos,
   validarEntradaManual,
   type EntradaDiario,
   type NuevaEntrada,
 } from "@/lib/food-log";
+import { PLATOS_CON_TAMANO } from "@/lib/food-recetas";
 import { hoyISO } from "@/lib/weight-trend";
 import { Aviso, Card, Field, MacroBar, MacroPills, SectionTitle, btnGhost, btnPrimary, btnSecondary, fmt, inputCls } from "./common";
 import { useDialogos } from "./dialogs";
@@ -144,7 +146,8 @@ function PanelAnadir({
     setError(null);
     if (f.gramos_unidad && f.unidad_nombre) {
       setModo("u");
-      setCantidad(String(unidadesDesdeGramos(gr, f.gramos_unidad)));
+      // Los platos con tamaño empiezan en «mediana»: 1 unidad
+      setCantidad(PLATOS_CON_TAMANO.has(f.nombre) ? "1" : String(unidadesDesdeGramos(gr, f.gramos_unidad)));
     } else {
       setModo("g");
       setCantidad(String(gr));
@@ -160,6 +163,7 @@ function PanelAnadir({
       : null;
   const vista = elegido && gramos ? macrosDe(elegido, gramos) : null;
   const tieneUnidad = !!(elegido?.gramos_unidad && elegido.unidad_nombre);
+  const conTamano = tieneUnidad && !!elegido && PLATOS_CON_TAMANO.has(elegido.nombre);
 
   async function guardar(entrada: NuevaEntrada, aviso?: string) {
     setGuardando(true);
@@ -295,6 +299,32 @@ function PanelAnadir({
               <span className="text-sm text-slate-500">gramos</span>
             )}
           </div>
+
+          {conTamano && elegido.gramos_unidad && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] text-slate-500">Tamaño:</span>
+              {TAMANOS.map((t) => {
+                const activo = modo === "u" && cantidadNum === t.factor;
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => {
+                      setModo("u");
+                      setCantidad(String(t.factor));
+                    }}
+                    aria-pressed={activo}
+                    className={
+                      "rounded-full border px-2.5 py-1 text-[11.5px] transition " +
+                      (activo ? "border-emerald-500 bg-emerald-500/15 text-emerald-300" : "border-slate-800 text-slate-400 hover:border-emerald-500 hover:text-white")
+                    }
+                  >
+                    {t.id} · ~{fmt(Math.round(elegido.gramos_unidad! * t.factor))} g
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           <div className="flex flex-wrap gap-1.5">
             {presets.map((p) => (

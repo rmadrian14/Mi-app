@@ -8,6 +8,7 @@
 // pesoFinal: gramos del plato ya cocinado (tras evaporación o absorción de agua y aceite).
 // raciones: para cuántas personas es la receta · racion: gramos de una ración si no es pesoFinal/raciones
 // unidad: [gramos, nombre] cuando el plato se cuenta por piezas (croqueta, torrija, porción)
+// tamanos: la pieza es la «mediana» y en el diario se puede elegir pequeña o grande (ver TAMANOS)
 import type { SeedFood } from "./food-seed";
 
 export type Receta = {
@@ -17,6 +18,7 @@ export type Receta = {
   pesoFinal: number;
   racion?: number;
   unidad?: [number, string];
+  tamanos?: true;
 };
 
 export const RECETAS: Receta[] = [
@@ -43,6 +45,12 @@ export const RECETAS: Receta[] = [
   { nombre: "Pisto manchego (receta casera)", raciones: 4, ingredientes: [["Calabacín", 400], ["Berenjena", 200], ["Pimiento rojo", 200], ["Pimiento verde", 200], ["Cebolla", 200], ["Tomate triturado (lata)", 400], ["Aceite de oliva virgen extra (AOVE)", 80]], pesoFinal: 1250 },
   { nombre: "Pimientos de Padrón fritos (receta casera)", raciones: 2, ingredientes: [["Pimiento verde", 200], ["Aceite de oliva virgen extra (AOVE)", 20]], pesoFinal: 190 },
   { nombre: "Escalivada (receta casera)", raciones: 3, ingredientes: [["Berenjena", 400], ["Pimiento rojo", 300], ["Cebolla", 200], ["Tomate", 200], ["Aceite de oliva virgen extra (AOVE)", 60]], pesoFinal: 735 },
+  // Berenjenas rellenas: 4 berenjenas medianas (250 g crudas cada una) para 4 raciones, con las cantidades
+  // intermedias de varias recetas (400 g de carne o 320 g de atún en el relleno). Se cuentan por berenjena
+  // entera rellena (dos mitades) y se puede elegir pequeña / mediana / grande al apuntarlas en el diario.
+  { nombre: "Berenjenas rellenas de carne y bechamel, gratinadas (receta casera)", raciones: 4, ingredientes: [["Berenjena", 1000], ["Carne picada mixta de vacuno y cerdo (cruda)", 400], ["Cebolla", 100], ["Tomate triturado (lata)", 200], ["Aceite de oliva virgen extra (AOVE)", 30], ["Leche entera", 350], ["Harina de trigo", 35], ["Mantequilla", 35], ["Queso rallado (genérico)", 50]], pesoFinal: 1500, unidad: [375, "berenjena"], tamanos: true },
+  { nombre: "Berenjenas rellenas de atún y tomate, gratinadas (receta casera)", raciones: 4, ingredientes: [["Berenjena", 1000], ["Atún en aceite de oliva (lata, escurrido)", 320], ["Tomate frito (conserva)", 200], ["Cebolla", 120], ["Aceite de oliva virgen extra (AOVE)", 30], ["Queso rallado (genérico)", 60]], pesoFinal: 1360, unidad: [340, "berenjena"], tamanos: true },
+  { nombre: "Berenjenas rellenas de verduras, gratinadas (receta casera)", raciones: 4, ingredientes: [["Berenjena", 1000], ["Calabacín", 200], ["Pimiento rojo", 150], ["Cebolla", 120], ["Champiñones", 150], ["Tomate triturado (lata)", 200], ["Aceite de oliva virgen extra (AOVE)", 40], ["Queso rallado (genérico)", 60]], pesoFinal: 1280, unidad: [320, "berenjena"], tamanos: true },
   { nombre: "Judías verdes con jamón y patata (receta casera)", raciones: 2, ingredientes: [["Judías verdes", 500], ["Patata (cruda)", 200], ["Jamón serrano", 50], ["Ajo (crudo)", 10], ["Aceite de oliva virgen extra (AOVE)", 25]], pesoFinal: 700 },
   { nombre: "Espinacas con pasas y piñones (receta casera)", raciones: 3, ingredientes: [["Espinacas", 600], ["Pasas", 40], ["Piñones", 30], ["Aceite de oliva virgen extra (AOVE)", 30], ["Ajo (crudo)", 5]], pesoFinal: 420 },
   { nombre: "Menestra de verduras con jamón (receta casera)", raciones: 3, ingredientes: [["Alcachofa (cruda, parte comestible)", 300], ["Guisantes (congelados)", 150], ["Judías verdes", 150], ["Zanahoria", 100], ["Jamón serrano", 50], ["Aceite de oliva virgen extra (AOVE)", 30]], pesoFinal: 650 },
@@ -98,6 +106,9 @@ export const RECETAS: Receta[] = [
   { nombre: "Gin-tonic", raciones: 1, ingredientes: [["Ginebra", 50], ["Tónica", 150]], pesoFinal: 200, unidad: [200, "copa"] },
   { nombre: "Whisky con cola", raciones: 1, ingredientes: [["Whisky", 50], ["Refresco de cola", 150]], pesoFinal: 200, unidad: [200, "cubata"] },
 ];
+
+// Platos que se pueden apuntar por tamaño aproximado en vez de pesarlos.
+export const PLATOS_CON_TAMANO: ReadonlySet<string> = new Set(RECETAS.filter((r) => r.tamanos).map((r) => r.nombre));
 
 const r1 = (x: number) => Math.round(x * 10) / 10;
 

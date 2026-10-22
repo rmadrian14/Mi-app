@@ -61,6 +61,13 @@ export function entradaDesdeAlimento(
 export const gramosDesdeUnidades = (unidades: number, gramosUnidad: number) => r1(unidades * gramosUnidad);
 export const unidadesDesdeGramos = (gramos: number, gramosUnidad: number) => Math.round((gramos / gramosUnidad) * 10) / 10;
 
+// Tamaño aproximado para quien no pesa: la unidad del alimento es la mediana y las otras son un múltiplo.
+export const TAMANOS = [
+  { id: "pequeña", factor: 0.7 },
+  { id: "mediana", factor: 1 },
+  { id: "grande", factor: 1.4 },
+] as const;
+
 // Cambia los gramos de una entrada manteniendo la proporción de sus valores.
 // Sin gramos (entrada a mano) o con una cantidad no válida no se puede escalar.
 export function escalarEntrada(e: EntradaDiario, nuevosGramos: number): EntradaDiario | null {

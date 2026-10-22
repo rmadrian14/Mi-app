@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { SEED_BASE, SEED_FOODS, SEED_PLATOS } from "./food-seed";
 import { SEED_ESPANA } from "./food-seed-espana";
-import { RECETAS, platosDesdeRecetas } from "./food-recetas";
+import { PLATOS_CON_TAMANO, RECETAS, platosDesdeRecetas } from "./food-recetas";
+import { TAMANOS } from "./food-log";
 
 const base = [...SEED_BASE, ...SEED_ESPANA];
 
@@ -71,6 +72,49 @@ describe("platos típicos calculados desde su receta", () => {
     const kcalUnidad = (c.kcal_100 * 35) / 100;
     expect(kcalUnidad).toBeGreaterThan(70);
     expect(kcalUnidad).toBeLessThan(110);
+  });
+
+  it("berenjenas rellenas: una berenjena mediana, con tamaño pequeño y grande", () => {
+    const rellenas = SEED_PLATOS.filter((p) => p.nombre.startsWith("Berenjenas rellenas"));
+    expect(rellenas.map((p) => p.nombre.split(",")[0])).toEqual([
+      "Berenjenas rellenas de carne y bechamel",
+      "Berenjenas rellenas de atún y tomate",
+      "Berenjenas rellenas de verduras",
+    ]);
+    for (const p of rellenas) {
+      expect(PLATOS_CON_TAMANO.has(p.nombre), p.nombre).toBe(true);
+      expect(p.unidad_nombre).toBe("berenjena");
+      const receta = RECETAS.find((r) => r.nombre === p.nombre)!;
+      // la unidad es el plato entre sus raciones (una berenjena entera rellena)
+      expect(p.gramos_unidad, p.nombre).toBe(Math.round(receta.pesoFinal / receta.raciones));
+      for (const t of TAMANOS) {
+        const kcal = (p.kcal_100 * p.gramos_unidad! * t.factor) / 100;
+        expect(kcal, `${p.nombre} (${t.id})`).toBeGreaterThan(150);
+        expect(kcal, `${p.nombre} (${t.id})`).toBeLessThan(900);
+      }
+    }
+    const por = (prefijo: string) => {
+      const p = rellenas.find((x) => x.nombre.startsWith(prefijo))!;
+      return (p.kcal_100 * p.gramos_unidad!) / 100;
+    };
+    // con carne y bechamel es lo más calórico y con verduras lo más ligero; la mediana de carne ronda las 550 kcal
+    expect(por("Berenjenas rellenas de carne")).toBeGreaterThan(por("Berenjenas rellenas de atún"));
+    expect(por("Berenjenas rellenas de atún")).toBeGreaterThan(por("Berenjenas rellenas de verduras"));
+    expect(por("Berenjenas rellenas de carne")).toBeGreaterThan(450);
+    expect(por("Berenjenas rellenas de carne")).toBeLessThan(700);
+    const carne = rellenas[0];
+    for (const m of ["carne", "cerdo", "lacteos", "gluten"]) expect(carne.contiene, m).toContain(m);
+    expect(rellenas[1].contiene).toContain("pescado");
+    expect(rellenas[2].contiene).not.toContain("carne");
+  });
+
+  it("tamaños: pequeña < mediana < grande, y la mediana es la unidad", () => {
+    expect(TAMANOS.map((t) => t.id)).toEqual(["pequeña", "mediana", "grande"]);
+    expect(TAMANOS.find((t) => t.id === "mediana")!.factor).toBe(1);
+    const f = TAMANOS.map((t) => t.factor);
+    expect([...f].sort((a, b) => a - b)).toEqual(f);
+    // solo los platos marcados con tamaño lo tienen
+    expect(PLATOS_CON_TAMANO.has("Croquetas de jamón (receta casera)")).toBe(false);
   });
 
   it("lentejas, tortilla y paella dan valores en el rango esperable por ración", () => {
