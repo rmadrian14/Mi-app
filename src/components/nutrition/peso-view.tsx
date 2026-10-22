@@ -5,12 +5,24 @@ import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YA
 import type { NutritionProfile, RegistroPeso } from "@/hooks/use-nutrition";
 import type { PersonalProfile } from "@/hooks/use-training";
 import { calcularObjetivos, type Sexo } from "@/lib/nutrition";
-import { hoyISO, mediaMovil, ordenar, sugerirAjuste, tendencia } from "@/lib/weight-trend";
+import { hoyISO, mediaMovil, ordenar, tendencia } from "@/lib/weight-trend";
+import { armarDias, estimarGasto, type Confianza } from "@/lib/gasto-adaptativo";
+import { useIngestasDiarias } from "@/hooks/use-gasto";
 import { Aviso, Card, Field, SectionTitle, btnGhost, btnPrimary, btnSecondary, fmt, inputCls } from "./common";
 import { useDialogos } from "./dialogs";
 
 const fechaCorta = (f: string) => `${f.slice(8, 10)}/${f.slice(5, 7)}`;
-const KCAL_MIN: Record<Sexo, number> = { mujer: 1200, hombre: 1500 };
+// Un ajuste nunca mueve las calorías más que esto de golpe (kcal/día).
+const AJUSTE_MAX = 200;
+// Por debajo de este cambio no se propone nada: es ruido.
+const AJUSTE_MIN = 50;
+
+const CONFIANZA: Record<Confianza, { texto: string; clase: string }> = {
+  ninguna: { texto: "Aún sin datos", clase: "bg-slate-800 text-slate-300" },
+  baja: { texto: "Confianza baja", clase: "bg-amber-500/15 text-amber-300" },
+  media: { texto: "Confianza media", clase: "bg-emerald-500/10 text-emerald-300" },
+  alta: { texto: "Confianza alta", clase: "bg-emerald-500/20 text-emerald-200" },
+};
 
 export type AplicarAjuste = { kcal_objetivo: number; kcal_mantenimiento: number };
 
@@ -37,6 +49,7 @@ export function PesoView({
   const [guardando, setGuardando] = useState(false);
   const [verTodo, setVerTodo] = useState(false);
   const { confirmar, dialogos } = useDialogos();
+  const { ingestas } = useIngestasDiarias();
 
   const ordenados = useMemo(() => ordenar(registros) as RegistroPeso[], [registros]);
   const serie = useMemo(() => mediaMovil(ordenados, 7), [ordenados]);
@@ -45,7 +58,7 @@ export function PesoView({
   const ultimo = ordenados[ordenados.length - 1];
   const media7 = serie[serie.length - 1]?.media;
 
-  // Gasto con el que se calcularon los objetivos (estimado, o el indicado).
+  // Lo que dice la ecuación de Mifflin-St Jeor para ti (sin el mantenimiento indicado): de aquí parte la estimación.
   const gasto = useMemo(() => {
     if (!personal?.sexo || !personal.edad || !personal.altura_cm) return null;
     const pesoRef = ultimo?.peso_kg ?? personal.peso_kg;
@@ -59,21 +72,36 @@ export function PesoView({
       diasEntreno: profile.dias_entreno,
       objetivo: profile.objetivo,
       ritmo: profile.ritmo,
-      kcalMantenimiento: profile.kcal_mantenimiento,
+      kcalMantenimiento: null,
     });
-    return { tdee: r.tdee, tmb: r.tmb, pesoRef, sexo: personal.sexo as Sexo };
+    return { prior: r.tdee, pesoRef };
   }, [personal, profile, ultimo]);
 
-  const sugerencia = useMemo(() => {
+  // Gasto real: la ecuación corregida con tu peso y lo que apuntas en el diario.
+  const estimacion = useMemo(() => {
     if (!gasto) return null;
-    return sugerirAjuste({
-      registros: ordenados,
-      kcalObjetivo: profile.kcal_objetivo,
-      gastoEstimado: gasto.tdee,
-      kcalMinimas: Math.max(gasto.tmb, KCAL_MIN[gasto.sexo]),
-      pesoKg: gasto.pesoRef,
+    const dias = armarDias(ordenados.map((r) => ({ fecha: r.fecha, peso_kg: r.peso_kg })), ingestas, hoy);
+    return estimarGasto({ prior: gasto.prior, dias, objetivo: profile.kcal_objetivo });
+  }, [gasto, ordenados, ingestas, hoy, profile.kcal_objetivo]);
+
+  // Calorías que saldrían con ese gasto y tu objetivo, sin moverse más de AJUSTE_MAX de golpe.
+  const propuesta = useMemo(() => {
+    if (!gasto || !estimacion || !personal?.sexo || !personal.edad || !personal.altura_cm) return null;
+    const r = calcularObjetivos({
+      sexo: personal.sexo as Sexo,
+      edad: personal.edad,
+      pesoKg: estimacion.pesoTendencia ?? gasto.pesoRef,
+      alturaCm: personal.altura_cm,
+      nivelActividad: profile.nivel_actividad,
+      diasEntreno: profile.dias_entreno,
+      objetivo: profile.objetivo,
+      ritmo: profile.ritmo,
+      kcalMantenimiento: estimacion.gasto,
     });
-  }, [ordenados, gasto, profile.kcal_objetivo]);
+    const paso = Math.max(-AJUSTE_MAX, Math.min(AJUSTE_MAX, r.kcal - profile.kcal_objetivo));
+    const kcalNueva = Math.round((profile.kcal_objetivo + paso) / 10) * 10;
+    return { ideal: r.kcal, kcalNueva, delta: kcalNueva - profile.kcal_objetivo, avisos: r.advertencias };
+  }, [gasto, estimacion, personal, profile]);
 
   async function guardar() {
     const kg = parseFloat(peso.replace(",", "."));
@@ -113,16 +141,15 @@ export function PesoView({
   }
 
   async function aplicar() {
-    if (sugerencia?.estado !== "ajustar") return;
-    const cambio = sugerencia.deltaKcal;
+    if (!estimacion || !propuesta || estimacion.confianza === "ninguna" || Math.abs(propuesta.delta) < AJUSTE_MIN) return;
     const si = await confirmar({
-      titulo: `¿Pasar a ${fmt(sugerencia.kcalNueva)} kcal?`,
-      descripcion: `${cambio > 0 ? "+" : ""}${fmt(cambio)} kcal al día; la diferencia se reparte en los hidratos (la proteína y la grasa se quedan igual). Tu mantenimiento estimado pasará a ${fmt(sugerencia.mantenimientoReal)} kcal.`,
+      titulo: `¿Pasar a ${fmt(propuesta.kcalNueva)} kcal?`,
+      descripcion: `${propuesta.delta > 0 ? "+" : ""}${fmt(propuesta.delta)} kcal al día; la diferencia se reparte en los hidratos (la proteína y la grasa se quedan igual). Tu mantenimiento pasará a ${fmt(estimacion.gasto)} kcal.`,
       etiquetaOk: "Aplicar",
     });
     if (!si) return;
     try {
-      await onAplicar({ kcal_objetivo: sugerencia.kcalNueva, kcal_mantenimiento: sugerencia.mantenimientoReal });
+      await onAplicar({ kcal_objetivo: propuesta.kcalNueva, kcal_mantenimiento: estimacion.gasto });
       toast.success("Objetivos actualizados. Regenera el menú para que cuadre con las calorías nuevas.");
     } catch (e) {
       toast.error((e as Error).message || "No se ha podido aplicar.");
@@ -219,45 +246,64 @@ export function PesoView({
         </Card>
       )}
 
-      {sugerencia && (
+      {estimacion && gasto && (
         <Card>
-          <SectionTitle>¿Van bien tus calorías?</SectionTitle>
-          {sugerencia.estado === "pocos_datos" && <Aviso tono="gris">{sugerencia.mensaje}</Aviso>}
-          {sugerencia.estado === "en_linea" && (
-            <div className="space-y-2">
-              <p className="text-sm text-slate-200">{sugerencia.mensaje}</p>
-              <p className="text-xs text-slate-500">
-                Ritmo real {fmt(sugerencia.observado, 2)} kg/semana · previsto {fmt(sugerencia.previsto, 2)}. Tu
-                mantenimiento real parece de unas {fmt(sugerencia.mantenimientoReal)} kcal (si has seguido el plan).
-              </p>
+          <SectionTitle>Tu gasto real</SectionTitle>
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <span className="text-3xl font-bold text-white">{fmt(estimacion.gasto)}</span>
+            <span className="text-sm text-slate-400">kcal al día para mantener tu peso</span>
+            <span className={"rounded-full px-2.5 py-0.5 text-[11px] font-semibold " + CONFIANZA[estimacion.confianza].clase}>
+              {CONFIANZA[estimacion.confianza].texto}
+            </span>
+          </div>
+          <p className="mt-1 text-xs text-slate-500">
+            Entre {fmt(estimacion.intervalo[0])} y {fmt(estimacion.intervalo[1])} · la fórmula decía {fmt(gasto.prior)} · datos: {estimacion.diasConPeso}{" "}
+            {estimacion.diasConPeso === 1 ? "pesada" : "pesadas"} y {estimacion.diasConIngesta} {estimacion.diasConIngesta === 1 ? "día" : "días"} de diario completos
+          </p>
+
+          {estimacion.confianza === "ninguna" ? (
+            <div className="mt-3">
+              <Aviso tono="gris">
+                Todavía se usa la estimación por fórmula: hacen falta unas 2-3 semanas de pesadas y de diario para medir tu gasto de verdad. Pésate cada
+                mañana en ayunas y apunta todo lo que comes cada día; los días a medias no cuentan.
+              </Aviso>
             </div>
-          )}
-          {sugerencia.estado === "ajustar" && (
-            <div className="space-y-3">
-              <p className="text-sm text-slate-200">{sugerencia.mensaje}</p>
-              <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3">
-                <p className="text-sm font-semibold text-emerald-200">
-                  Sugerencia: {sugerencia.deltaKcal > 0 ? "subir" : "bajar"} a {fmt(sugerencia.kcalNueva)} kcal (
-                  {sugerencia.deltaKcal > 0 ? "+" : ""}
-                  {fmt(sugerencia.deltaKcal)} kcal/día)
-                </p>
-                <p className="mt-1 text-xs text-slate-400">
-                  Tu mantenimiento real parece de unas {fmt(sugerencia.mantenimientoReal)} kcal si has seguido el
-                  plan. El cambio es como máximo de 300 kcal cada vez; vuelve a valorar tras 2-3 semanas.
-                </p>
+          ) : (
+            propuesta && (
+              <div className="mt-3 space-y-3">
+                {estimacion.kgSemana != null && (
+                  <p className="text-sm text-slate-300">
+                    Con lo que has comido estas dos semanas, tu peso tiende a cambiar unos {estimacion.kgSemana > 0 ? "+" : ""}
+                    {fmt(estimacion.kgSemana, 2)} kg por semana.
+                  </p>
+                )}
+                {Math.abs(propuesta.delta) >= AJUSTE_MIN ? (
+                  <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3">
+                    <p className="text-sm font-semibold text-emerald-200">
+                      Sugerencia: {propuesta.delta > 0 ? "subir" : "bajar"} a {fmt(propuesta.kcalNueva)} kcal ({propuesta.delta > 0 ? "+" : ""}
+                      {fmt(propuesta.delta)} kcal/día)
+                    </p>
+                    <p className="mt-1 text-xs text-slate-400">
+                      Con tu gasto medido y tu objetivo, lo ideal serían {fmt(propuesta.ideal)} kcal. Los cambios son de {AJUSTE_MAX} kcal como máximo cada vez;
+                      vuelve a mirarlo en una semana.
+                    </p>
+                    <button type="button" onClick={aplicar} className={btnPrimary + " mt-3"}>
+                      Aplicar a mis objetivos
+                    </button>
+                  </div>
+                ) : (
+                  <p className="text-sm text-emerald-200">Tus {fmt(profile.kcal_objetivo)} kcal encajan con tu gasto real. No hace falta cambiar nada.</p>
+                )}
+                {propuesta.avisos.map((a) => (
+                  <Aviso key={a}>{a}</Aviso>
+                ))}
               </div>
-              {sugerencia.aviso && <Aviso>{sugerencia.aviso}</Aviso>}
-              <div className="flex gap-2">
-                <button type="button" onClick={aplicar} className={btnPrimary}>
-                  Aplicar a mis objetivos
-                </button>
-              </div>
-            </div>
+            )
           )}
           <p className="mt-3 text-[11px] text-slate-600">
-            Se compara tu tendencia real con la prevista según tu plan (~7.700 kcal por kg). El peso diario oscila por
-            el agua y la digestión, por eso solo se opina con varias semanas de datos y no por cambios pequeños. Si
-            no has seguido el plan con regularidad, el cálculo no es fiable.
+            Se calcula con tus pesadas y con lo que apuntas: lo que comes menos lo que tu peso dice que has guardado (~7.000 kcal por kg). Parte de la fórmula
+            y se va ajustando a ti; el peso diario oscila por el agua, así que una pesada rara apenas cuenta. Va en las mismas unidades que tu diario: si
+            apuntas algo menos de lo que comes, el gasto sale algo menor y las calorías objetivo siguen siendo las correctas para ti.
           </p>
         </Card>
       )}
