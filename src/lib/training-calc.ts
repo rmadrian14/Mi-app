@@ -383,7 +383,15 @@ export type ProgressionSuggestion =
     }
   | { kind: "mantener_fallo"; currentWeightKg: number; previousFecha: string }
   | { kind: "sube_rango"; currentWeightKg: number; suggestedWeightKg: number; repMax: number }
-  | { kind: "mantener_rango"; currentWeightKg: number; lastReps: number[]; repMax: number };
+  | { kind: "baja_rango"; currentWeightKg: number; suggestedWeightKg: number; repMin: number; lastReps: number[] }
+  | {
+      kind: "mantener_rango";
+      currentWeightKg: number;
+      lastReps: number[];
+      repMax: number;
+      repMin: number;
+      bajoMinimo: boolean; // la mayoría de las series se quedó por debajo del mínimo del rango
+    };
 
 export type ProgSessionRow = { id: string; fecha: string; esfuerzo_percibido: number | null };
 export type ProgSetRow = {
@@ -426,6 +434,18 @@ export function construirHistorial(
   return map;
 }
 
+// Peso con el que se hizo la mayor parte de las series (si empatan, el mayor): las series más ligeras
+// (calentamiento, o una serie de bajada) no deciden si toca subir.
+export function pesoDeTrabajo(sets: { reps: number; peso: number | null }[]): number | null {
+  const cuenta = new Map<number, number>();
+  for (const s of sets) if (s.peso != null && s.peso > 0) cuenta.set(s.peso, (cuenta.get(s.peso) ?? 0) + 1);
+  let mejor: number | null = null;
+  for (const [peso, n] of cuenta) {
+    if (mejor == null || n > (cuenta.get(mejor) ?? 0) || (n === cuenta.get(mejor) && peso > mejor)) mejor = peso;
+  }
+  return mejor;
+}
+
 // Sugerencia de peso para la próxima vez que se haga un ejercicio, a partir de
 // las dos últimas sesiones en las que se registró. Dos ramas según cómo esté
 // redactado el objetivo de reps de ese ejercicio en su día de rutina:
@@ -442,11 +462,12 @@ export function sugerirProgresion(
   repsObjetivo: string,
 ): ProgressionSuggestion | null {
   const history = historyByExercise.get(exerciseId);
-  if (!history || history.length < 2) return null;
+  if (!history || history.length < 1) return null;
   const curr = history[history.length - 1];
-  const prev = history[history.length - 2];
+  const prev = history.length >= 2 ? history[history.length - 2] : null;
 
   if (/fallo/i.test(repsObjetivo)) {
+    if (!prev) return null; // sin una sesión anterior con la que comparar el e1RM
     const bestOf = (occ: ProgOccurrence) => {
       let best: { e1rm: number; peso: number } | null = null;
       for (const s of occ.sets) {
@@ -495,10 +516,12 @@ export function sugerirProgresion(
 
   const range = parseRepRangeObjetivo(repsObjetivo);
   if (!range) return null;
-  const currentWeightKg = curr.sets.find((s) => s.peso != null)?.peso ?? null;
+  const currentWeightKg = pesoDeTrabajo(curr.sets);
   if (currentWeightKg == null) return null;
 
-  const allAtTop = curr.sets.every((s) => s.reps >= range.max);
+  const deTrabajo = curr.sets.filter((s) => s.peso === currentWeightKg);
+  const reps = deTrabajo.map((s) => s.reps);
+  const allAtTop = reps.every((r) => r >= range.max);
   if (allAtTop) {
     return {
       kind: "sube_rango",
@@ -507,11 +530,97 @@ export function sugerirProgresion(
       repMax: range.max,
     };
   }
+
+  // Por debajo del mínimo del rango en la mayoría de las series: una sesión mala puede ser cansancio, pero
+  // dos seguidas con ese peso (o más) dicen que el peso es demasiado alto: se baja un 10 %.
+  const bajoMinimo = reps.filter((r) => r < range.min).length > reps.length / 2;
+  if (bajoMinimo && prev) {
+    const pesoPrev = pesoDeTrabajo(prev.sets);
+    const repsPrev = pesoPrev == null ? [] : prev.sets.filter((s) => s.peso === pesoPrev).map((s) => s.reps);
+    const prevBajo = repsPrev.length > 0 && repsPrev.filter((r) => r < range.min).length > repsPrev.length / 2;
+    if (prevBajo && pesoPrev != null && pesoPrev >= currentWeightKg) {
+      return {
+        kind: "baja_rango",
+        currentWeightKg,
+        suggestedWeightKg: Math.max(2, Math.min(currentWeightKg - 2, roundToStep(currentWeightKg * 0.9, 2))),
+        repMin: range.min,
+        lastReps: reps,
+      };
+    }
+  }
   return {
     kind: "mantener_rango",
     currentWeightKg,
-    lastReps: curr.sets.map((s) => s.reps),
+    lastReps: reps,
     repMax: range.max,
+    repMin: range.min,
+    bajoMinimo,
+  };
+}
+
+/* ------------------------------ Carga reciente frente a la habitual (aguda:crónica) ------------------------------ */
+
+export type ZonaCarga = "baja" | "optima" | "alta" | "muy_alta";
+
+export type CargaAC = {
+  aguda: number; // carga diaria media de los últimos 7 días
+  cronica: number; // carga diaria media de los últimos 28 días (lo habitual)
+  ratio: number | null;
+  zona: ZonaCarga | null;
+  fiable: boolean;
+  sesiones: number;
+  dias: number; // días desde la primera sesión con carga
+};
+
+const VENTANA_AGUDA = 7;
+const VENTANA_CRONICA = 28;
+export const MIN_DIAS_CARGA = 28;
+export const MIN_SESIONES_CARGA = 8;
+
+export function zonaDeCarga(ratio: number): ZonaCarga {
+  if (ratio < 0.8) return "baja";
+  if (ratio <= 1.3) return "optima";
+  if (ratio <= 1.5) return "alta";
+  return "muy_alta";
+}
+
+const diaNum = (fecha: string) => Date.UTC(+fecha.slice(0, 4), +fecha.slice(5, 7) - 1, +fecha.slice(8, 10)) / 86_400_000;
+
+// Carga de cada sesión = esfuerzo percibido (1-10) × minutos (la «sRPE» de Foster). Se compara la carga diaria
+// media de los últimos 7 días (aguda) con la de los últimos 28 (crónica). Se usan medias móviles simples y no
+// exponenciales porque se entrena unos 3 días a la semana: con las exponenciales el resultado cambia según el día
+// de la semana en que lo mires (sale «baja» un domingo aunque entrenes siempre igual). Es una referencia
+// orientativa: sirve para ver si has subido la carga de golpe o si llevas días sin entrenar; no predice lesiones.
+export function calcularCargaAC(sessions: DeloadSessionRow[], hoy: string): CargaAC {
+  const porDia = new Map<number, number>();
+  let n = 0;
+  for (const s of sessions) {
+    if (!s.completado || s.esfuerzo_percibido == null || s.duracion_min == null || s.fecha > hoy) continue;
+    const d = diaNum(s.fecha);
+    porDia.set(d, (porDia.get(d) ?? 0) + s.esfuerzo_percibido * s.duracion_min);
+    n++;
+  }
+  if (n === 0) return { aguda: 0, cronica: 0, ratio: null, zona: null, fiable: false, sesiones: 0, dias: 0 };
+  const inicio = Math.min(...porDia.keys());
+  const fin = diaNum(hoy);
+  const dias = Math.max(0, fin - inicio) + 1;
+  const media = (ventana: number) => {
+    const largo = Math.min(ventana, dias);
+    let suma = 0;
+    for (let d = fin - largo + 1; d <= fin; d++) suma += porDia.get(d) ?? 0;
+    return suma / largo;
+  };
+  const aguda = media(VENTANA_AGUDA);
+  const cronica = media(VENTANA_CRONICA);
+  const ratio = cronica > 0 ? aguda / cronica : null;
+  return {
+    aguda: Math.round(aguda),
+    cronica: Math.round(cronica),
+    ratio: ratio == null ? null : Math.round(ratio * 100) / 100,
+    zona: ratio == null ? null : zonaDeCarga(ratio),
+    fiable: dias >= MIN_DIAS_CARGA && n >= MIN_SESIONES_CARGA,
+    sesiones: n,
+    dias,
   };
 }
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   MUSCLE_LANDMARKS,
+  calcularCargaAC,
   calcularVolumenSemanal,
   construirHistorial,
   discomfortSemaforo,
@@ -9,9 +10,11 @@ import {
   muscleVolumeZone,
   normalizeMuscleGroup,
   parseRepRangeObjetivo,
+  pesoDeTrabajo,
   roundToStep,
   sugerirProgresion,
   toLocalISODate,
+  zonaDeCarga,
   type DeloadExerciseRow,
   type DeloadSessionRow,
   type DeloadSetRow,
@@ -390,6 +393,158 @@ describe("sugerirProgresion · rango de reps fijo (progresión doble)", () => {
   it("un objetivo que no se entiende no genera sugerencia", () => {
     const sets = [pset("s1", "E", 20, 12), pset("s2", "E", 20, 15)];
     expect(sugerir(sesiones, sets, "al gusto")).toBeNull();
+  });
+});
+
+describe("sugerirProgresion · mejoras (primera sesión, peso de trabajo, bajar peso)", () => {
+  it("con una sola sesión ya sugiere en rangos fijos (antes hacían falta dos)", () => {
+    const una = [ps("s1", "2026-10-01")];
+    const arriba = sugerir(una, [pset("s1", "E", 20, 15), pset("s1", "E", 20, 15), pset("s1", "E", 20, 15)], "12-15");
+    expect(arriba?.kind).toBe("sube_rango");
+    const dentro = sugerir(una, [pset("s1", "E", 20, 13), pset("s1", "E", 20, 12), pset("s1", "E", 20, 12)], "12-15");
+    expect(dentro).toMatchObject({ kind: "mantener_rango", currentWeightKg: 20, bajoMinimo: false });
+    // pero «al fallo» sigue necesitando una sesión anterior con la que comparar el e1RM
+    expect(sugerir(una, [pset("s1", "E", 20, 10)], "al fallo")).toBeNull();
+    expect(sugerir([], [], "12-15")).toBeNull();
+  });
+
+  it("el peso de trabajo es el más repetido: un calentamiento ligero no impide subir", () => {
+    const sesiones = [ps("s1", "2026-10-01")];
+    const sets = [pset("s1", "E", 10, 15), pset("s1", "E", 20, 15), pset("s1", "E", 20, 15), pset("s1", "E", 20, 16)];
+    expect(pesoDeTrabajo([{ reps: 15, peso: 10 }, { reps: 15, peso: 20 }, { reps: 15, peso: 20 }])).toBe(20);
+    expect(pesoDeTrabajo([{ reps: 8, peso: 40 }, { reps: 8, peso: 50 }])).toBe(50); // empate: el mayor
+    expect(pesoDeTrabajo([{ reps: 8, peso: null }])).toBeNull();
+    const s = sugerir(sesiones, sets, "12-15");
+    expect(s?.kind).toBe("sube_rango");
+    if (s?.kind === "sube_rango") expect(s.currentWeightKg).toBe(20);
+  });
+
+  it("una sesión por debajo del mínimo solo avisa; dos seguidas bajan el peso un 10 %", () => {
+    const uno = sugerir(
+      [ps("s1", "2026-10-01"), ps("s2", "2026-10-08")],
+      [pset("s1", "E", 30, 11), pset("s1", "E", 30, 12), pset("s2", "E", 30, 9), pset("s2", "E", 30, 10), pset("s2", "E", 30, 8)],
+      "12-15",
+    );
+    expect(uno).toMatchObject({ kind: "mantener_rango", bajoMinimo: true, repMin: 12, lastReps: [9, 10, 8] });
+
+    const dos = sugerir(
+      [ps("s1", "2026-10-01"), ps("s2", "2026-10-08"), ps("s3", "2026-10-15")],
+      [
+        pset("s1", "E", 30, 12), pset("s1", "E", 30, 12), pset("s1", "E", 30, 12),
+        pset("s2", "E", 30, 9), pset("s2", "E", 30, 10), pset("s2", "E", 30, 8),
+        pset("s3", "E", 30, 10), pset("s3", "E", 30, 9), pset("s3", "E", 30, 9),
+      ],
+      "12-15",
+    );
+    // la sesión anterior (s2) también estaba por debajo; 30 × 0,9 = 27 → 28 con múltiplos de 2, pero siempre al menos 2 kg menos: 28
+    expect(dos).toMatchObject({ kind: "baja_rango", currentWeightKg: 30, repMin: 12 });
+    if (dos?.kind === "baja_rango") {
+      expect(dos.suggestedWeightKg).toBeLessThanOrEqual(28);
+      expect(dos.suggestedWeightKg).toBeGreaterThanOrEqual(26);
+      expect(dos.suggestedWeightKg % 2).toBe(0);
+    }
+  });
+
+  it("no baja si en la sesión anterior sí llegaba al rango, ni si ya había bajado de peso", () => {
+    const buena = sugerir(
+      [ps("s1", "2026-10-01"), ps("s2", "2026-10-08")],
+      [pset("s1", "E", 30, 12), pset("s1", "E", 30, 13), pset("s2", "E", 30, 9), pset("s2", "E", 30, 9)],
+      "12-15",
+    );
+    expect(buena?.kind).toBe("mantener_rango");
+    // antes pesaba menos (26) y ahora 30 se queda corto: no es una racha con el mismo peso
+    const subio = sugerir(
+      [ps("s1", "2026-10-01"), ps("s2", "2026-10-08")],
+      [pset("s1", "E", 26, 9), pset("s1", "E", 26, 9), pset("s2", "E", 30, 9), pset("s2", "E", 30, 9)],
+      "12-15",
+    );
+    expect(subio?.kind).toBe("mantener_rango");
+  });
+
+  it("la bajada nunca es menor de 2 kg ni deja el peso en cero", () => {
+    const s = sugerir(
+      [ps("s1", "2026-10-01"), ps("s2", "2026-10-08")],
+      [pset("s1", "E", 4, 5), pset("s1", "E", 4, 5), pset("s2", "E", 4, 5), pset("s2", "E", 4, 4)],
+      "8-10",
+    );
+    expect(s?.kind).toBe("baja_rango");
+    if (s?.kind === "baja_rango") {
+      expect(s.suggestedWeightKg).toBeGreaterThanOrEqual(2);
+      expect(s.suggestedWeightKg).toBeLessThan(4);
+    }
+  });
+});
+
+/* ------------------------------ Carga reciente frente a la habitual ------------------------------ */
+
+describe("calcularCargaAC (esfuerzo × minutos, medias móviles de 7 y 28 días)", () => {
+  const sesion = (fecha: string, rpe: number | null = 7, min: number | null = 60): DeloadSessionRow => ({
+    id: fecha, fecha, routine_day_id: null, es_extra: false, completado: true, esfuerzo_percibido: rpe, duracion_min: min,
+  });
+  const dia = (base: string, n: number) => {
+    const d = new Date(`${base}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.toISOString().slice(0, 10);
+  };
+  // Entrena lunes, miércoles y viernes durante `semanas`
+  const habitual = (inicio: string, semanas: number, rpe = 7, min = 60) => {
+    const out: DeloadSessionRow[] = [];
+    for (let w = 0; w < semanas; w++) for (const d of [0, 2, 4]) out.push(sesion(dia(inicio, w * 7 + d), rpe, min));
+    return out;
+  };
+  const INICIO = "2026-08-03"; // lunes
+
+  it("entrenando siempre igual, el cociente es ≈ 1 (zona óptima) y ya es fiable tras 4 semanas", () => {
+    const c = calcularCargaAC(habitual(INICIO, 8), dia(INICIO, 8 * 7 - 1));
+    expect(c.ratio).not.toBeNull();
+    expect(c.ratio as number).toBeGreaterThan(0.85);
+    expect(c.ratio as number).toBeLessThan(1.2);
+    expect(c.zona).toBe("optima");
+    expect(c.fiable).toBe(true);
+    expect(c.sesiones).toBe(24);
+  });
+
+  it("entrenando siempre igual da lo mismo cualquier día de la semana (no sale «baja» un domingo)", () => {
+    const sesiones = habitual(INICIO, 8);
+    for (let k = 0; k < 7; k++) {
+      const c = calcularCargaAC(sesiones, dia(INICIO, 7 * 7 + k)); // la última semana, de lunes a domingo
+      expect(c.ratio as number, `día ${k}`).toBeGreaterThan(0.9);
+      expect(c.ratio as number, `día ${k}`).toBeLessThan(1.12);
+    }
+  });
+
+  it("subir la carga de golpe la última semana sale por encima de lo habitual", () => {
+    const base = habitual(INICIO, 6);
+    const pico = habitual(dia(INICIO, 6 * 7), 1, 9, 100); // la última semana, mucho más duro y largo
+    const c = calcularCargaAC([...base, ...pico], dia(INICIO, 7 * 7 - 1));
+    expect(c.ratio as number).toBeGreaterThan(1.3);
+    expect(["alta", "muy_alta"]).toContain(c.zona);
+  });
+
+  it("dos semanas sin entrenar la dejan por debajo de lo habitual", () => {
+    const c = calcularCargaAC(habitual(INICIO, 6), dia(INICIO, 8 * 7 - 1));
+    expect(c.ratio as number).toBeLessThan(0.8);
+    expect(c.zona).toBe("baja");
+  });
+
+  it("con pocos datos no es fiable, y sin esfuerzo o duración no cuenta ninguna sesión", () => {
+    const poco = calcularCargaAC(habitual(INICIO, 1), dia(INICIO, 6));
+    expect(poco.fiable).toBe(false);
+    const sin = calcularCargaAC([sesion("2026-10-01", null, 60), sesion("2026-10-03", 7, null)], "2026-10-10");
+    expect(sin).toMatchObject({ ratio: null, zona: null, sesiones: 0, fiable: false });
+    expect(calcularCargaAC([], "2026-10-10").ratio).toBeNull();
+  });
+
+  it("las sesiones no completadas o futuras no cuentan", () => {
+    const s = [{ ...sesion("2026-10-01"), completado: false }, sesion("2026-10-20")];
+    expect(calcularCargaAC(s, "2026-10-10").sesiones).toBe(0);
+  });
+
+  it("las zonas: <0,8 baja · 0,8-1,3 óptima · 1,3-1,5 alta · >1,5 muy alta", () => {
+    expect([0.5, 0.79].map(zonaDeCarga)).toEqual(["baja", "baja"]);
+    expect([0.8, 1, 1.3].map(zonaDeCarga)).toEqual(["optima", "optima", "optima"]);
+    expect([1.31, 1.5].map(zonaDeCarga)).toEqual(["alta", "alta"]);
+    expect([1.51, 2].map(zonaDeCarga)).toEqual(["muy_alta", "muy_alta"]);
   });
 });
 

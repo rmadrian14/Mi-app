@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { leerTodo } from "@/lib/supabase-paging";
 import {
   calcularVolumenSemanal,
+  calcularCargaAC,
   construirHistorial,
   estimate1RM,
   evaluarDescarga,
@@ -1035,8 +1036,9 @@ export function useDeloadCheck() {
   }, [refresh]);
 
   const result = useMemo(() => evaluarDescarga(sessions, sets, exercises), [sessions, sets, exercises]);
+  const carga = useMemo(() => calcularCargaAC(sessions, toLocalISODate(new Date())), [sessions]);
 
-  return { loading, ...result, refresh };
+  return { loading, ...result, carga, refresh };
 }
 
 /* ------------------------------ Sugerencia de progresión de carga ------------------------------ */

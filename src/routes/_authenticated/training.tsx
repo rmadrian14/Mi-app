@@ -73,6 +73,7 @@ import {
   DISCOMFORT_ZONAS,
   discomfortSemaforo,
 } from "@/hooks/use-training";
+import { MIN_SESIONES_CARGA } from "@/lib/training-calc";
 
 export const Route = createFileRoute("/_authenticated/training")({
   component: TrainingPage,
@@ -740,6 +741,7 @@ function ProgressionSuggestionBadge({ suggestion }: { suggestion: ProgressionSug
   if (!suggestion) return null;
 
   const sube = suggestion.kind === "sube_fallo_reps" || suggestion.kind === "sube_fallo_e1rm" || suggestion.kind === "sube_rango";
+  const baja = suggestion.kind === "baja_rango";
 
   let title: string;
   let body: string;
@@ -762,7 +764,13 @@ function ProgressionSuggestionBadge({ suggestion }: { suggestion: ProgressionSug
       break;
     case "mantener_rango":
       title = `Mantén ${suggestion.currentWeightKg} kg, intenta llegar a ${suggestion.repMax} reps en todas las series`;
-      body = `Última vez: ${suggestion.lastReps.join(", ")}.`;
+      body = suggestion.bajoMinimo
+        ? `Última vez: ${suggestion.lastReps.join(", ")} (por debajo de ${suggestion.repMin} reps en la mayoría de las series). Si vuelve a pasar, baja el peso.`
+        : `Última vez: ${suggestion.lastReps.join(", ")}.`;
+      break;
+    case "baja_rango":
+      title = `Prueba con ${suggestion.suggestedWeightKg} kg (antes ${suggestion.currentWeightKg} kg)`;
+      body = `Dos sesiones seguidas por debajo de ${suggestion.repMin} reps en la mayoría de las series (última vez: ${suggestion.lastReps.join(", ")}). Con menos peso recuperas el rango y vuelves a subir.`;
       break;
   }
 
@@ -770,13 +778,14 @@ function ProgressionSuggestionBadge({ suggestion }: { suggestion: ProgressionSug
     <div
       className={
         "mb-3 flex items-start gap-1.5 rounded-lg border px-2.5 py-2 text-[11.5px] " +
-        (sube ? "border-indigo-500/30 bg-indigo-500/10" : "border-slate-800 bg-slate-950/60")
+        (sube ? "border-indigo-500/30 bg-indigo-500/10" : baja ? "border-amber-500/30 bg-amber-500/10" : "border-slate-800 bg-slate-950/60")
       }
     >
       {sube && <TrendingUp className="mt-0.5 h-3.5 w-3.5 shrink-0 text-indigo-400" />}
+      {baja && <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-400" />}
       <div className="min-w-0">
-        <p className={"font-semibold " + (sube ? "text-indigo-300" : "text-slate-400")}>Sugerencia: {title}</p>
-        <p className={sube ? "text-indigo-200/70" : "text-slate-500"}>{body}</p>
+        <p className={"font-semibold " + (sube ? "text-indigo-300" : baja ? "text-amber-300" : "text-slate-400")}>Sugerencia: {title}</p>
+        <p className={sube ? "text-indigo-200/70" : baja ? "text-amber-200/70" : "text-slate-500"}>{body}</p>
       </div>
     </div>
   );
@@ -1771,6 +1780,45 @@ function MuscleVolumeSection() {
   );
 }
 
+const ZONA_CARGA: Record<NonNullable<ReturnType<typeof useDeloadCheck>["carga"]["zona"]>, { texto: string; clase: string; detalle: string }> = {
+  baja: { texto: "Por debajo de tu ritmo", clase: "text-slate-300", detalle: "Estás entrenando menos de lo habitual (o llevas días sin hacerlo). Si es a propósito, bien; si no, retoma la rutina poco a poco." },
+  optima: { texto: "En tu zona habitual", clase: "text-emerald-300", detalle: "Tu carga de ahora es parecida a la de las últimas semanas." },
+  alta: { texto: "Algo por encima de lo habitual", clase: "text-amber-300", detalle: "Has subido la carga bastante respecto a tus últimas semanas. Cuida el descanso y no la subas más esta semana." },
+  muy_alta: { texto: "Muy por encima de lo habitual", clase: "text-rose-300", detalle: "Has subido la carga de golpe. Conviene aflojar unos días: es cuando más molestias y cansancio aparecen." },
+};
+
+function CargaReciente({ carga }: { carga: ReturnType<typeof useDeloadCheck>["carga"] }) {
+  const zona = carga.ratio != null && carga.zona ? ZONA_CARGA[carga.zona] : null;
+  return (
+    <div className="mt-4 border-t border-slate-800 pt-3">
+      <p className="text-[10.5px] font-bold uppercase tracking-widest text-emerald-400">Carga reciente frente a la habitual</p>
+      {!zona || carga.ratio == null ? (
+        <p className="mt-1.5 text-xs text-slate-500">
+          Hace falta registrar el esfuerzo y la duración al terminar las sesiones para calcularla.
+        </p>
+      ) : (
+        <>
+          <p className="mt-1.5 text-xs">
+            <span className={"font-semibold " + (carga.fiable ? zona.clase : "text-slate-400")}>
+              {carga.ratio.toLocaleString("es-ES", { minimumFractionDigits: 2 })} · {zona.texto}
+            </span>
+            {!carga.fiable && <span className="text-slate-500"> (aún orientativo)</span>}
+          </p>
+          <p className="mt-0.5 text-xs text-slate-500">
+            {carga.fiable
+              ? zona.detalle
+              : `Con ${carga.sesiones} ${carga.sesiones === 1 ? "sesión" : "sesiones"} en ${carga.dias} ${carga.dias === 1 ? "día" : "días"} todavía no se puede fiar: hacen falta unas ${MIN_SESIONES_CARGA} sesiones repartidas en 4 semanas.`}
+          </p>
+        </>
+      )}
+      <p className="mt-1.5 text-[11px] text-slate-600">
+        Compara tu carga de la última semana (esfuerzo × minutos) con la de las últimas 4 semanas. Entre 0,8 y 1,3 es lo normal; no predice
+        lesiones, solo avisa de subidas o bajadas bruscas.
+      </p>
+    </div>
+  );
+}
+
 function DeloadChecklist({ deload }: { deload: ReturnType<typeof useDeloadCheck> }) {
   return (
     <section className="mb-6 rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
@@ -1817,6 +1865,8 @@ function DeloadChecklist({ deload }: { deload: ReturnType<typeof useDeloadCheck>
           tu peso habitual.
         </p>
       )}
+
+      {!deload.loading && <CargaReciente carga={deload.carga} />}
 
       <p className="mt-3 text-[11px] text-slate-600">
         Hace falta un mínimo de historial (2-3 sesiones o semanas, según la señal) para poder evaluar cada una; si
